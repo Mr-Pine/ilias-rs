@@ -682,7 +682,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ilias-rs"
+name = "ilias"
 version = "0.1.0"
 dependencies = [
  "anyhow",

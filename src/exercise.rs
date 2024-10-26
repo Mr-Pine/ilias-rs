@@ -99,3 +99,27 @@ impl IliasElement for Exercise {
         })
     }
 }
+
+impl Exercise {
+    pub fn get_grades(&mut self, ilias_client: &IliasClient) -> Option<&Grades> {
+        let grades = &mut self.grades;
+        match grades {
+            Reference::Unavailable => None,
+            Reference::Resolved(ref grades) => Some(grades),
+            Reference::Unresolved(querypath) => {
+                let ass_sub = Grades::parse(
+                    &ilias_client
+                        .get_querypath(&querypath)
+                        .expect("Could not get submission page")
+                        .root_element(),
+                    querypath,
+                    ilias_client,
+                )
+                .expect("Could not parse submission page");
+                *grades = Reference::Resolved(ass_sub);
+
+                grades.try_get_resolved()
+            }
+        }
+    }
+}

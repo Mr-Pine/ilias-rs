@@ -15,7 +15,7 @@ pub struct Grades {
 static ASS_ID_OPTION_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 impl Grades {
-    fn parse(
+    pub fn parse(
         element: ElementRef,
         base_querypath: &str,
         ilias_client: &IliasClient,
