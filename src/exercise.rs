@@ -9,7 +9,7 @@ use scraper::{selectable::Selectable, ElementRef, Selector};
 pub mod assignment;
 pub mod grades;
 
-use super::{client::IliasClient, IliasElement, reference::Reference};
+use super::{client::IliasClient, reference::Reference, IliasElement};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -76,10 +76,7 @@ impl IliasElement for Exercise {
                 .to_string();
             let base_querypath = base_grades_querypath_regex
                 .find(&querypath)
-                .expect(&format!(
-                    "Grades querypath {} had unexpected format",
-                    querypath
-                ))
+                .unwrap_or_else(|| panic!("Grades querypath {} had unexpected format", querypath))
                 .as_str()
                 .to_string();
             base_querypath
@@ -109,7 +106,7 @@ impl Exercise {
             Reference::Unresolved(querypath) => {
                 let ass_sub = Grades::parse(
                     ilias_client
-                        .get_querypath(&querypath)
+                        .get_querypath(querypath)
                         .expect("Could not get submission page")
                         .root_element(),
                     querypath,

@@ -1,10 +1,7 @@
-use std::{
-    borrow::Cow,
-    fmt::Debug,
-    path::Path,
-};
+use std::{borrow::Cow, fmt::Debug, path::Path};
 
 use anyhow::{anyhow, Context, Ok, Result};
+use log::info;
 use reqwest::{
     multipart::{self, Form, Part},
     Client, Response, Url,
@@ -26,7 +23,10 @@ pub struct IliasClient {
 
 impl IliasClient {
     pub fn new(base_url: Url) -> Result<IliasClient> {
-        let client = Client::builder().cookie_store(true).build()?;
+        let client = Client::builder()
+            .cookie_store(true)
+            .use_rustls_tls()
+            .build()?;
         let runtime = Runtime::new().unwrap();
 
         Ok(IliasClient {
@@ -115,7 +115,7 @@ impl IliasClient {
     }
 
     pub fn authenticate(&self, username: &str, password: &str) -> Result<()> {
-        println!("Authenticating!");
+        info!("Authenticating!");
 
         let shib_path = "shib_login.php";
 
@@ -211,7 +211,7 @@ impl IliasClient {
         let ilias_home = self.runtime.block_on(ilias_home);
 
         if ilias_home?.status().is_success() {
-            println!("Logged in!");
+            info!("Logged in!");
             Ok(())
         } else {
             Err(anyhow!("Ilias login not successful!"))
@@ -219,7 +219,25 @@ impl IliasClient {
     }
 
     pub fn construct_file_part<T: AsRef<Path>>(&self, path: T) -> Result<Part> {
-        Ok(self.runtime.block_on(Part::file(path))?)
+        let part = async {
+            let path = path.as_ref();
+            let file_name = path
+                .file_name()
+                .map(|filename| filename.to_string_lossy().into_owned());
+            let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+            let mime = mime_guess::from_ext(ext).first_or_octet_stream();
+            let file = File::open(path).await?;
+            let length = file.metadata().await?.len();
+            let field = Part::stream_with_length(file, length).mime_str(mime.as_ref())?;
+
+            Ok(if let Some(file_name) = file_name {
+                field.file_name(file_name)
+            } else {
+                field
+            })
+        };
+
+        Ok(self.runtime.block_on(part)?)
     }
 }
 

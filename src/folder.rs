@@ -188,10 +188,12 @@ impl Folder {
             .expect("no match found :()")["querypath"];
 
         for file_data in files {
-            let form = Form::new().part("file[0]", ilias_client.construct_file_part(&file_data.path)?);
+            let form = Form::new().part(
+                "file[0]",
+                ilias_client.construct_file_part(&file_data.path)?,
+            );
 
-            let response= ilias_client
-                .post_querypath_multipart(upload_querypath, form)?;
+            let response = ilias_client.post_querypath_multipart(upload_querypath, form)?;
             let response: IliasUploadResponse = ilias_client.get_json(response)?;
             let file_id = response.file_id;
 

@@ -4,8 +4,11 @@ use anyhow::{Context, Result};
 use base64::Engine;
 use regex::Regex;
 use scraper::{selectable::Selectable, ElementRef, Html, Selector};
+use submission::GradeSubmission;
 
 use crate::{client::IliasClient, reference::Reference, IliasElement};
+
+pub mod submission;
 
 #[derive(Debug)]
 pub struct Grades {
@@ -15,10 +18,7 @@ pub struct Grades {
 static ASS_ID_OPTION_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 impl Grades {
-    pub fn parse(
-        element: ElementRef,
-        base_querypath: &str,
-    ) -> Result<Self> {
+    pub fn parse(element: ElementRef, base_querypath: &str) -> Result<Self> {
         let ass_id_option_selector = ASS_ID_OPTION_SELECTOR.get_or_init(|| {
             Selector::parse("select#ass_id>option").expect("Could not parrse selector")
         });
@@ -44,10 +44,12 @@ pub struct GradePage {
     pub name: String,
     ass_id: String,
     toolbar_form_querypath: String,
+    pub submissions: Vec<GradeSubmission>,
 }
 
 static SELECTED_ASSIGNMENT_DROPDOWN_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static TOOLBAR_FORM_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static SUBMISSION_ROW_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 impl IliasElement for GradePage {
     fn type_identifier() -> Option<&'static str> {
@@ -66,6 +68,9 @@ impl IliasElement for GradePage {
             });
         let toolbar_form_selector = TOOLBAR_FORM_SELECTOR
             .get_or_init(|| Selector::parse("form#ilToolbar").expect("Could not parse selector"));
+        let submission_row_selector = SUBMISSION_ROW_SELECTOR.get_or_init(|| {
+            Selector::parse("table#exc_mem tbody tr").expect("Could not parse selector")
+        });
 
         let assignment_selection = element
             .select(selected_assignment_dropdown_selector)
@@ -85,10 +90,16 @@ impl IliasElement for GradePage {
             .context("Toolbar form had no action")?
             .to_string();
 
+        let submissions = element
+            .select(submission_row_selector)
+            .map(|row| GradeSubmission::parse(row))
+            .collect::<Result<Vec<_>>>()?;
+
         Ok(GradePage {
             name,
             ass_id,
             toolbar_form_querypath,
+            submissions,
         })
     }
 }

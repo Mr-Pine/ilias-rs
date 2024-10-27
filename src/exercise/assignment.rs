@@ -198,7 +198,7 @@ impl Assignment {
             Reference::Unresolved(querypath) => {
                 let ass_sub = AssignmentSubmission::parse_submissions_page(
                     ilias_client
-                        .get_querypath(&querypath)
+                        .get_querypath(querypath)
                         .expect("Could not get submission page")
                         .root_element(),
                     ilias_client,
