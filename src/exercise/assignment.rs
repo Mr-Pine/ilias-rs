@@ -5,7 +5,7 @@ use chrono::{DateTime, Local};
 use reqwest::multipart::Form;
 use scraper::{selectable::Selectable, ElementRef, Selector};
 
-use crate::Reference;
+use crate::reference::Reference;
 
 use super::super::{
     client::{AddFileWithFilename, IliasClient},
@@ -197,7 +197,7 @@ impl Assignment {
             Reference::Resolved(ref submission) => Some(submission),
             Reference::Unresolved(querypath) => {
                 let ass_sub = AssignmentSubmission::parse_submissions_page(
-                    &ilias_client
+                    ilias_client
                         .get_querypath(&querypath)
                         .expect("Could not get submission page")
                         .root_element(),
@@ -263,7 +263,7 @@ static FILE_ROW_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 impl AssignmentSubmission {
     fn parse_submissions_page(
-        submission_page: &ElementRef,
+        submission_page: ElementRef,
         ilias_client: &IliasClient,
     ) -> Result<AssignmentSubmission> {
         let upload_button_selector = UPLOAD_BUTTON_SELECTOR.get_or_init(|| {

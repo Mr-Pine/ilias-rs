@@ -5,7 +5,7 @@ use base64::Engine;
 use regex::Regex;
 use scraper::{selectable::Selectable, ElementRef, Html, Selector};
 
-use crate::{client::IliasClient, IliasElement, Reference};
+use crate::{client::IliasClient, reference::Reference, IliasElement};
 
 #[derive(Debug)]
 pub struct Grades {
@@ -18,7 +18,6 @@ impl Grades {
     pub fn parse(
         element: ElementRef,
         base_querypath: &str,
-        ilias_client: &IliasClient,
     ) -> Result<Self> {
         let ass_id_option_selector = ASS_ID_OPTION_SELECTOR.get_or_init(|| {
             Selector::parse("select#ass_id>option").expect("Could not parrse selector")
@@ -28,19 +27,9 @@ impl Grades {
             .select(ass_id_option_selector)
             .map(|option| {
                 let ass_id = option.attr("value").expect("Option did not have a value");
-                let selected = option
-                    .attr("selected")
-                    .map_or(false, |val| val == "selected");
 
-                if selected {
-                    Reference::Resolved(
-                        GradePage::parse(element, ilias_client)
-                            .expect("Could not parse grade page"),
-                    )
-                } else {
-                    let querypath = format!("{}&ass_id={}", base_querypath, ass_id);
-                    Reference::Unresolved(querypath)
-                }
+                let querypath = format!("{}&ass_id={}", base_querypath, ass_id);
+                Reference::Unresolved(querypath)
             })
             .collect::<Vec<_>>();
 
@@ -52,10 +41,12 @@ impl Grades {
 
 #[derive(Debug)]
 pub struct GradePage {
+    pub name: String,
     ass_id: String,
     toolbar_form_querypath: String,
 }
 
+static SELECTED_ASSIGNMENT_DROPDOWN_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static TOOLBAR_FORM_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 impl IliasElement for GradePage {
@@ -67,21 +58,25 @@ impl IliasElement for GradePage {
         None
     }
 
-    fn parse(element: ElementRef, ilias_client: &IliasClient) -> Result<Self> {
-        let selected_assignment_dropdown_selector = TOOLBAR_FORM_SELECTOR.get_or_init(|| {
-            Selector::parse("select#ass_id option[selected=\"selected\"]")
-                .expect("Could not parse selector")
-        });
+    fn parse(element: ElementRef, _ilias_client: &IliasClient) -> Result<Self> {
+        let selected_assignment_dropdown_selector = SELECTED_ASSIGNMENT_DROPDOWN_SELECTOR
+            .get_or_init(|| {
+                Selector::parse("select#ass_id option[selected=\"selected\"]")
+                    .expect("Could not parse selector")
+            });
         let toolbar_form_selector = TOOLBAR_FORM_SELECTOR
             .get_or_init(|| Selector::parse("form#ilToolbar").expect("Could not parse selector"));
 
-        let ass_id = element
+        let assignment_selection = element
             .select(selected_assignment_dropdown_selector)
             .next()
-            .context("Did not find selected assignment in dropdown")?
+            .context("Did not find selected assignment in dropdown")?;
+        let ass_id = assignment_selection
             .attr("value")
             .context("Dropdown entry did not have a value")?
             .to_string();
+        let name = assignment_selection.text().collect();
+
         let toolbar_form_querypath = element
             .select(toolbar_form_selector)
             .next()
@@ -91,6 +86,7 @@ impl IliasElement for GradePage {
             .to_string();
 
         Ok(GradePage {
+            name,
             ass_id,
             toolbar_form_querypath,
         })
@@ -100,7 +96,11 @@ impl IliasElement for GradePage {
 static NOTIFICATION_ITEM_BUTTON_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 impl GradePage {
-    fn download_all_submissions_zip(&self, ilias_client: &IliasClient, to: &Path) -> Result<()> {
+    pub fn download_all_submissions_zip(
+        &self,
+        ilias_client: &IliasClient,
+        to: &Path,
+    ) -> Result<()> {
         let form_data = [
             ("ass_id", self.ass_id.as_str()),
             ("user_login", ""),
@@ -111,12 +111,12 @@ impl GradePage {
         let html = Html::parse_document(&ilias_client.get_text(response)?);
 
         let notification_item_button_selector = NOTIFICATION_ITEM_BUTTON_SELECTOR.get_or_init(|| Selector::parse(".il-aggregate-notifications .il-notification-item .media-body .il-item-notification-title button").expect("Could not parse selector"));
-        let form_url_regex = Regex::new("form_url=(?<url>[^&]+)&")?;
+        let from_url_regex = Regex::new("from_url=(?<url>[^&]+)&")?;
         let dowload_querypath = html
             .select(notification_item_button_selector)
             .map(|button| button.attr("data-action").expect("Button had no action"))
             .find_map(|querypath| {
-                let form_url = form_url_regex.captures(querypath)?.name("url")?.as_str();
+                let form_url = from_url_regex.captures(querypath)?.name("url")?.as_str();
                 let form_url = String::from_utf8(
                     base64::prelude::BASE64_URL_SAFE_NO_PAD
                         .decode(form_url)
@@ -132,6 +132,8 @@ impl GradePage {
             })
             .context("Could not find download querypath")?;
 
-        todo!()
+        ilias_client.download_file(dowload_querypath, to)?;
+
+        Ok(())
     }
 }

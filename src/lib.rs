@@ -10,6 +10,7 @@ pub mod exercise;
 pub mod file;
 pub mod folder;
 pub mod local_file;
+pub mod reference;
 
 pub const ILIAS_URL: &str = "https://ilias.studium.kit.edu";
 
@@ -18,29 +19,6 @@ pub trait IliasElement: Sized {
     fn querypath_from_id(id: &str) -> Option<String>;
 
     fn parse(element: ElementRef, ilias_client: &IliasClient) -> Result<Self>;
-}
-
-#[derive(Debug)]
-pub enum Reference<T> {
-    Unavailable,
-    Unresolved(String),
-    Resolved(T)
-}
-
-impl <T> Reference<T> {
-    pub fn from_optional_querypath(querypath: Option<String>) -> Reference<T> {
-        match querypath {
-            None => Self::Unavailable,
-            Some(querypath) => Self::Unresolved(querypath)
-        }
-    }
-
-    pub fn try_get_resolved(&self) -> Option<&T> {
-        match self {
-            Self::Resolved(t) => Some(t),
-            _ => None
-        }
-    }
 }
 
 fn parse_date(date_string: &str) -> Result<DateTime<Local>> {

@@ -9,7 +9,7 @@ use scraper::{selectable::Selectable, ElementRef, Selector};
 pub mod assignment;
 pub mod grades;
 
-use super::{client::IliasClient, IliasElement, Reference};
+use super::{client::IliasClient, IliasElement, reference::Reference};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -108,12 +108,11 @@ impl Exercise {
             Reference::Resolved(ref grades) => Some(grades),
             Reference::Unresolved(querypath) => {
                 let ass_sub = Grades::parse(
-                    &ilias_client
+                    ilias_client
                         .get_querypath(&querypath)
                         .expect("Could not get submission page")
                         .root_element(),
                     querypath,
-                    ilias_client,
                 )
                 .expect("Could not parse submission page");
                 *grades = Reference::Resolved(ass_sub);

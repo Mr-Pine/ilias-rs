@@ -1,19 +1,19 @@
-use std::{borrow::Cow, fmt::Debug, path::{Path, PathBuf}};
+use std::{
+    borrow::Cow,
+    fmt::Debug,
+    path::Path,
+};
 
 use anyhow::{anyhow, Context, Ok, Result};
-use file_storage_provider::FileStorageProvider;
 use reqwest::{
     multipart::{self, Form, Part},
     Client, Response, Url,
 };
 use scraper::{Html, Selector};
 use serde::{de::DeserializeOwned, Serialize};
-use stream_download::{
-    http::HttpStream, Settings, StreamDownload,
-};
-use tokio::runtime::Runtime;
-
-mod file_storage_provider;
+use tokio::{fs::File, io::BufWriter, runtime::Runtime};
+use tokio_stream::StreamExt;
+use tokio_util::io::StreamReader;
 
 use super::Querypath;
 
@@ -90,23 +90,27 @@ impl IliasClient {
         Ok(response.error_for_status()?)
     }
 
-    pub fn download_file(&self, querypath: &str, to: PathBuf) -> Result<()> {
+    pub fn download_file(&self, querypath: &str, to: &Path) -> Result<()> {
         let mut url = self.base_url.clone();
         url.set_querypath(querypath);
 
         self.runtime.block_on(async {
-            let stream = HttpStream::new(self.client.clone(), url).await?;
-            let stream_download = StreamDownload::from_stream(
-                stream,
-                FileStorageProvider::new(to),
-                Settings::default(),
-            )
-            .await?;
+            let response = self.client.get(url.clone()).send().await?;
+            let body_stream = response.bytes_stream();
+            let body_stream = body_stream.map(|result| {
+                result.map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))
+            });
+            let mut body_reader = StreamReader::new(body_stream);
 
-            Ok(stream_download)
-        });
+            let mut options = File::options();
+            options.write(true);
+            options.create(true);
+            let file = options.open(to).await?;
+            let mut file_writer = BufWriter::new(file);
 
-        println!("Downloaded (hopefully)");
+            tokio::io::copy(&mut body_reader, &mut file_writer).await?;
+            Ok(())
+        })?;
         Ok(())
     }
 
