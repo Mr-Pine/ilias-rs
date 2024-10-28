@@ -93,7 +93,8 @@ impl IliasElement for GradePage {
         let submissions = element
             .select(submission_row_selector)
             .map(|row| GradeSubmission::parse(row))
-            .collect::<Result<Vec<_>>>()?;
+            .filter_map(|subm| subm.ok())
+            .collect::<Vec<_>>();
 
         Ok(GradePage {
             name,
