@@ -117,12 +117,13 @@ impl IliasElement for Assignment {
         let submission_start_date =
             Self::get_value_for_keys(schedule_info, &["Startzeit", "Start Time"])?;
         let submission_start_date = parse_date(submission_start_date.trim())?;
-        let submission_end_date_while_open = 
+        let submission_end_date_while_open =
             Self::get_value_for_keys(schedule_info, &["Abgabetermin", "Edit Until"]);
         let submission_end_date;
         if submission_end_date_while_open.is_err() {
-            submission_end_date = Self::get_value_for_keys(schedule_info, &["Beendet am", "Ended On"])?;
-        }else {
+            submission_end_date =
+                Self::get_value_for_keys(schedule_info, &["Beendet am", "Ended On"])?;
+        } else {
             submission_end_date = submission_end_date_while_open?;
         }
         let submission_end_date = parse_date(submission_end_date.trim())?;
