@@ -284,7 +284,6 @@ impl FolderElement {
             .find(|&href| href.contains("cmd=delete"))
             .map(|qp| qp.to_string());
 
-        dbg!(id, actions_querypath, &deletion_querypath);
         deletion_querypath
     }
 
