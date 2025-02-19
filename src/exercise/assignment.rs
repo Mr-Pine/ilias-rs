@@ -19,7 +19,7 @@ use super::super::{
 pub struct Assignment {
     pub name: String,
     pub instructions: Option<String>,
-    pub submission_start_date: DateTime<Local>,
+    pub submission_start_date: Option<DateTime<Local>>,
     pub submission_end_date: DateTime<Local>,
     pub attachments: Vec<File>,
     submission: Reference<AssignmentSubmission>,
@@ -88,11 +88,9 @@ impl IliasElement for Assignment {
             .collect();
 
         let instruction_info = info_screens.iter().find_map(|(screen, name)| {
-            if ["Arbeitsanweisung", "Work Instructions"].contains(&name.as_str()) {
-                Some(screen)
-            } else {
-                None
-            }
+            ["Arbeitsanweisung", "Work Instructions"]
+                .contains(&name.as_str())
+                .then(|| screen)
         });
         let instructions = instruction_info.and_then(|instruction_info| {
             Some(
@@ -107,33 +105,24 @@ impl IliasElement for Assignment {
         let schedule_info = info_screens
             .iter()
             .find_map(|(screen, name)| {
-                if ["Schedule", "Terminplan"].contains(&name.as_str()) {
-                    Some(*screen)
-                } else {
-                    None
-                }
+                ["Schedule", "Terminplan"]
+                    .contains(&name.as_str())
+                    .then(|| *screen)
             })
             .context("Did not find schedule")?;
         let submission_start_date =
-            Self::get_value_for_keys(schedule_info, &["Startzeit", "Start Time"])?;
-        let submission_start_date = parse_date(submission_start_date.trim())?;
-        let submission_end_date_while_open =
-            Self::get_value_for_keys(schedule_info, &["Abgabetermin", "Edit Until"]);
-        let submission_end_date;
-        if submission_end_date_while_open.is_err() {
-            submission_end_date =
-                Self::get_value_for_keys(schedule_info, &["Beendet am", "Ended On"])?;
-        } else {
-            submission_end_date = submission_end_date_while_open?;
-        }
-        let submission_end_date = parse_date(submission_end_date.trim())?;
-
+            Self::get_value_for_keys(schedule_info, &["Startzeit", "Start Time"])
+                .ok()
+                .map(|date| parse_date(date.trim()))
+                .transpose()?;
+        let submission_end_date =
+            Self::get_value_for_keys(schedule_info, &["Abgabetermin", "Edit Until"])
+                .or_else(|_| Self::get_value_for_keys(schedule_info, &["Beendet am", "Ended On"]))
+                .and_then(|date| parse_date(date.trim()))?;
         let attachment_info = info_screens.iter().find_map(|(screen, name)| {
-            if ["Dateien", "Files"].contains(&name.as_str()) {
-                Some(screen)
-            } else {
-                None
-            }
+            ["Dateien", "Files"]
+                .contains(&name.as_str())
+                .then(|| screen)
         });
         let attachments = attachment_info.map_or(vec![], |attachment_info| {
             let file_rows = attachment_info.select(property_row_selector);
@@ -166,11 +155,9 @@ impl IliasElement for Assignment {
         });
 
         let submission_info = info_screens.iter().find_map(|(screen, name)| {
-            if ["Ihre Einreichung", "Your Submission"].contains(&name.as_str()) {
-                Some(*screen)
-            } else {
-                None
-            }
+            ["Ihre Einreichung", "Your Submission"]
+                .contains(&name.as_str())
+                .then(|| *screen)
         });
         let submission_page_querypath = submission_info
             .and_then(|info| {
@@ -194,7 +181,10 @@ impl IliasElement for Assignment {
 
 impl Assignment {
     pub fn is_active(&self) -> bool {
-        self.submission_end_date >= Local::now() && self.submission_start_date <= Local::now()
+        self.submission_end_date >= Local::now()
+            && self
+                .submission_start_date
+                .map_or(true, |date| date <= Local::now())
     }
 
     pub fn get_submission(&mut self, ilias_client: &IliasClient) -> Option<&AssignmentSubmission> {
