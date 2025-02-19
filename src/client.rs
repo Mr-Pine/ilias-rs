@@ -154,8 +154,8 @@ impl IliasClient {
         let path_selector =
             Selector::parse(r#"form[method="post"]"#).expect("Could not parse selector");
 
-        if crsf_field.is_some() {
-            let crsf = crsf_field.unwrap().value().attr("value").unwrap();
+        if let Some(crsf_field) = crsf_field {
+            let crsf = crsf_field.value().attr("value").unwrap();
 
             let form_data = [
                 ("csrf_token", crsf),

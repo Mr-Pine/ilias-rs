@@ -19,7 +19,7 @@ use super::super::{
 pub struct Assignment {
     pub name: String,
     pub instructions: Option<String>,
-    pub submission_start_date: DateTime<Local>,
+    pub submission_start_date: Option<DateTime<Local>>,
     pub submission_end_date: DateTime<Local>,
     pub attachments: Vec<File>,
     submission: Reference<AssignmentSubmission>,
@@ -88,11 +88,9 @@ impl IliasElement for Assignment {
             .collect();
 
         let instruction_info = info_screens.iter().find_map(|(screen, name)| {
-            if ["Arbeitsanweisung", "Work Instructions"].contains(&name.as_str()) {
-                Some(screen)
-            } else {
-                None
-            }
+            ["Arbeitsanweisung", "Work Instructions"]
+                .contains(&name.as_str())
+                .then_some(screen)
         });
         let instructions = instruction_info.and_then(|instruction_info| {
             Some(
@@ -107,33 +105,24 @@ impl IliasElement for Assignment {
         let schedule_info = info_screens
             .iter()
             .find_map(|(screen, name)| {
-                if ["Schedule", "Terminplan"].contains(&name.as_str()) {
-                    Some(*screen)
-                } else {
-                    None
-                }
+                ["Schedule", "Terminplan"]
+                    .contains(&name.as_str())
+                    .then_some(*screen)
             })
             .context("Did not find schedule")?;
         let submission_start_date =
-            Self::get_value_for_keys(schedule_info, &["Startzeit", "Start Time"])?;
-        let submission_start_date = parse_date(submission_start_date.trim())?;
-        let submission_end_date_while_open =
-            Self::get_value_for_keys(schedule_info, &["Abgabetermin", "Edit Until"]);
-        let submission_end_date;
-        if submission_end_date_while_open.is_err() {
-            submission_end_date =
-                Self::get_value_for_keys(schedule_info, &["Beendet am", "Ended On"])?;
-        } else {
-            submission_end_date = submission_end_date_while_open?;
-        }
-        let submission_end_date = parse_date(submission_end_date.trim())?;
-
+            Self::get_value_for_keys(schedule_info, &["Startzeit", "Start Time"])
+                .ok()
+                .map(|date| parse_date(date.trim()))
+                .transpose()?;
+        let submission_end_date =
+            Self::get_value_for_keys(schedule_info, &["Abgabetermin", "Edit Until"])
+                .or_else(|_| Self::get_value_for_keys(schedule_info, &["Beendet am", "Ended On"]))
+                .and_then(|date| parse_date(date.trim()))?;
         let attachment_info = info_screens.iter().find_map(|(screen, name)| {
-            if ["Dateien", "Files"].contains(&name.as_str()) {
-                Some(screen)
-            } else {
-                None
-            }
+            ["Dateien", "Files"]
+                .contains(&name.as_str())
+                .then_some(screen)
         });
         let attachments = attachment_info.map_or(vec![], |attachment_info| {
             let file_rows = attachment_info.select(property_row_selector);
@@ -166,11 +155,9 @@ impl IliasElement for Assignment {
         });
 
         let submission_info = info_screens.iter().find_map(|(screen, name)| {
-            if ["Ihre Einreichung", "Your Submission"].contains(&name.as_str()) {
-                Some(*screen)
-            } else {
-                None
-            }
+            ["Ihre Einreichung", "Your Submission"]
+                .contains(&name.as_str())
+                .then_some(*screen)
         });
         let submission_page_querypath = submission_info
             .and_then(|info| {
@@ -179,7 +166,7 @@ impl IliasElement for Assignment {
             })
             .and_then(|info| info.select(submission_page_selector).next())
             .map(|link| link.attr("href").expect("Could not find href in link"))
-            .map(|querypath| querypath.to_string());
+            .map(ToOwned::to_owned);
 
         Ok(Assignment {
             name,
@@ -194,7 +181,10 @@ impl IliasElement for Assignment {
 
 impl Assignment {
     pub fn is_active(&self) -> bool {
-        self.submission_end_date >= Local::now() && self.submission_start_date <= Local::now()
+        self.submission_end_date >= Local::now()
+            && self
+                .submission_start_date
+                .map_or(true, |date| date <= Local::now())
     }
 
     pub fn get_submission(&mut self, ilias_client: &IliasClient) -> Option<&AssignmentSubmission> {
@@ -274,13 +264,13 @@ impl AssignmentSubmission {
         ilias_client: &IliasClient,
     ) -> Result<AssignmentSubmission> {
         let upload_button_selector = UPLOAD_BUTTON_SELECTOR.get_or_init(|| {
-            Selector::parse(r#"nav div.navbar-header button"#).expect("Could not parse selector")
+            Selector::parse("nav div.navbar-header button").expect("Could not parse selector")
         });
         let content_form_selector = CONTENT_FORM_SELECTOR.get_or_init(|| {
-            Selector::parse(r#"div#ilContentContainer form"#).expect("Could not parse selector")
+            Selector::parse("div#ilContentContainer form").expect("Could not parse selector")
         });
         let file_row_selector = FILE_ROW_SELECTOR
-            .get_or_init(|| Selector::parse(r#"form tbody tr"#).expect("Could not parse selector"));
+            .get_or_init(|| Selector::parse("form tbody tr").expect("Could not parse selector"));
 
         let file_rows = submission_page.select(file_row_selector);
         let uploaded_files = file_rows
@@ -326,7 +316,7 @@ impl AssignmentSubmission {
                 File {
                     id: Some(id.to_string()),
                     name: file_name,
-                    description: "".to_string(),
+                    description: String::new(),
                     date: Some(submission_date),
                     download_querypath: Some(download_querypath.to_string()),
                 }
@@ -383,7 +373,7 @@ impl AssignmentSubmission {
         for (index, file_data) in files.iter().enumerate() {
             form = form
                 .file_with_name(
-                    format!("deliver[{}]", index),
+                    format!("deliver[{index}]"),
                     ilias_client.construct_file_part(&file_data.path),
                     file_data.name.clone(),
                 )?

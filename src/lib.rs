@@ -53,7 +53,7 @@ fn parse_date(date_string: &str) -> Result<DateTime<Local>> {
             &["Dez", "Dec"],
         ];
 
-        let date_regex = Regex::new("^(?<day>\\d+)\\. (?<month>\\w+) (?<year>\\w+)$")?;
+        let date_regex = Regex::new(r"^(?<day>\d+)\. (?<month>\w+) (?<year>\w+)$")?;
         let date_split = date_regex
             .captures(date)
             .context(anyhow!("Could not match date {}", date))?;
@@ -100,7 +100,7 @@ impl Querypath for Url {
     }
 
     fn set_querypath(&mut self, querypath: &str) {
-        let mut parts = querypath.split("?");
+        let mut parts = querypath.split('?');
         self.set_path(parts.next().unwrap());
         self.set_query(parts.next());
     }

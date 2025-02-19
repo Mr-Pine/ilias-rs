@@ -47,26 +47,26 @@ impl IliasElement for Exercise {
         let description_selector = DESCRIPTION_SELECTOR
             .get_or_init(|| Selector::parse(".ilHeaderDesc").expect("Could not parse scraper"));
         let assignment_selector = ASSIGNMENT_SELECTOR.get_or_init(|| {
-            Selector::parse(r#"div.il_VAccordionContainer div.il_VAccordionInnerContainer"#)
+            Selector::parse("div.il_VAccordionContainer div.il_VAccordionInnerContainer")
                 .expect("Could not parse scraper")
         });
         let grades_tab_selector = GRADES_TAB_SELECTOR.get_or_init(|| {
-            Selector::parse(r#".nav-tabs #tab_grades a"#).expect("Could not parse scraper")
+            Selector::parse(".nav-tabs #tab_grades a").expect("Could not parse scraper")
         });
 
         let base_grades_querypath_regex = BASE_GRADES_QUERYPATH_REGEX
-            .get_or_init(|| Regex::new(".*ref_id=\\d+").expect("Could not parse regex"));
+            .get_or_init(|| Regex::new(r".*ref_id=\d+").expect("Could not parse regex"));
 
         let name = element
             .select(name_selector)
             .next()
-            .context("No \"name\" Element found")?
+            .context(r#"No "name" Element found"#)?
             .text()
             .collect();
         let description = element
             .select(description_selector)
             .next()
-            .context("No \"description\" Element found")?
+            .context(r#"No "description" Element found"#)?
             .text()
             .collect();
         let grades_tab_querypath = element.select(grades_tab_selector).next().map(|link| {
@@ -76,7 +76,7 @@ impl IliasElement for Exercise {
                 .to_string();
             let base_querypath = base_grades_querypath_regex
                 .find(&querypath)
-                .unwrap_or_else(|| panic!("Grades querypath {} had unexpected format", querypath))
+                .unwrap_or_else(|| panic!("Grades querypath {querypath} had unexpected format"))
                 .as_str()
                 .to_string();
             base_querypath

@@ -89,7 +89,7 @@ impl IliasElement for Folder {
             Selector::parse(".breadcrumbs span:last-child a").expect("Could not parse selector")
         });
         let upload_file_page_selector = UPLOAD_FILE_PAGE_SELECTOR.get_or_init(|| {
-            Selector::parse(r#"#il-add-new-item-gl #file"#).expect("Could not parse selector")
+            Selector::parse("#il-add-new-item-gl #file").expect("Could not parse selector")
         });
 
         let element_selector = ELEMENT_SELECTOR.get_or_init(|| {
@@ -241,7 +241,7 @@ impl FolderElement {
             .expect("Could not parse link")
             .get_querypath();
 
-        let id = Regex::new("ref_id=(?<id>\\d+)|target=file_(?<file_id>\\d+)")
+        let id = Regex::new(r"ref_id=(?<id>\d+)|target=file_(?<file_id>\d+)")
             .ok()?
             .captures(&querypath)
             .and_then(|capture| capture.name("id").or(capture.name("file_id")))?
@@ -282,7 +282,7 @@ impl FolderElement {
             .select(element_actions_selector)
             .filter_map(|element| element.attr("href"))
             .find(|&href| href.contains("cmd=delete"))
-            .map(|qp| qp.to_string());
+            .map(ToOwned::to_owned);
 
         deletion_querypath
     }
@@ -317,10 +317,10 @@ impl FolderElement {
                 }
             };
 
-            let name = if !extension.is_empty() {
-                format!("{}.{}", name, extension)
-            } else {
+            let name = if extension.is_empty() {
                 name
+            } else {
+                format!("{name}.{extension}")
             };
 
             let file = File {
@@ -348,7 +348,7 @@ impl FolderElement {
             })
         } else if querypath.contains("baseClass=ilrepositorygui") && querypath.contains("cmd=view")
         {
-            let id = Regex::new("ref_id=(?<id>\\d+)")
+            let id = Regex::new(r"ref_id=(?<id>\d+)")
                 .ok()?
                 .captures(&querypath)?
                 .name("id")?
@@ -369,29 +369,16 @@ impl FolderElement {
     fn deletion_querypath(&self) -> Option<&String> {
         match self {
             Self::File {
-                file: _,
-                deletion_querypath,
-            } => deletion_querypath,
-            Self::Exercise {
-                name: _,
-                description: _,
-                id: _,
-                querypath: _,
-                deletion_querypath,
-            } => deletion_querypath,
-            Self::Opencast {
-                name: _,
-                description: _,
-                id: _,
-                querypath: _,
-                deletion_querypath,
-            } => deletion_querypath,
-            Self::Viewable {
-                name: _,
-                description: _,
-                id: _,
-                querypath: _,
-                deletion_querypath,
+                deletion_querypath, ..
+            }
+            | Self::Exercise {
+                deletion_querypath, ..
+            }
+            | Self::Opencast {
+                deletion_querypath, ..
+            }
+            | Self::Viewable {
+                deletion_querypath, ..
             } => deletion_querypath,
         }
         .as_ref()
@@ -409,61 +396,17 @@ impl FolderElement {
 
     fn id(&self) -> &str {
         match self {
-            Self::File {
-                file,
-                deletion_querypath: _,
-            } => file.id.as_ref().unwrap(),
-            Self::Exercise {
-                name: _,
-                description: _,
-                id,
-                querypath: _,
-                deletion_querypath: _,
-            } => id,
-            Self::Opencast {
-                name: _,
-                description: _,
-                id,
-                querypath: _,
-                deletion_querypath: _,
-            } => id,
-            Self::Viewable {
-                name: _,
-                description: _,
-                id,
-                querypath: _,
-                deletion_querypath: _,
-            } => id,
+            Self::File { file, .. } => file.id.as_ref().unwrap(),
+            Self::Exercise { id, .. } | Self::Opencast { id, .. } | Self::Viewable { id, .. } => id,
         }
     }
 
     fn name(&self) -> &str {
         match self {
-            Self::File {
-                file,
-                deletion_querypath: _,
-            } => &file.name,
-            Self::Exercise {
-                name,
-                description: _,
-                id: _,
-                querypath: _,
-                deletion_querypath: _,
-            } => name,
-            Self::Opencast {
-                name,
-                description: _,
-                id: _,
-                querypath: _,
-                deletion_querypath: _,
-            } => name,
-            Self::Viewable {
-                name,
-                description: _,
-                id: _,
-                querypath: _,
-                deletion_querypath: _,
-            } => name,
+            Self::File { file, .. } => &file.name,
+            Self::Exercise { name, .. }
+            | Self::Opencast { name, .. }
+            | Self::Viewable { name, .. } => name,
         }
     }
 
@@ -513,28 +456,28 @@ impl Display for FolderElement {
             FolderElement::File {
                 file,
                 deletion_querypath: _,
-            } => write!(f, "{}", file),
+            } => write!(f, "{file}"),
             FolderElement::Exercise {
                 name,
                 description: _,
                 id: _,
                 querypath: _,
                 deletion_querypath: _,
-            } => write!(f, "Exercise {}", name),
+            } => write!(f, "Exercise {name}"),
             FolderElement::Opencast {
                 name,
                 description: _,
                 id: _,
                 querypath: _,
                 deletion_querypath: _,
-            } => write!(f, "OpenCast {}", name),
+            } => write!(f, "OpenCast {name}"),
             FolderElement::Viewable {
                 name,
                 description: _,
                 id: _,
                 querypath: _,
                 deletion_querypath: _,
-            } => write!(f, "Folder(-like) {}", name),
+            } => write!(f, "Folder(-like) {name}"),
         }
     }
 }
