@@ -28,7 +28,7 @@ impl Grades {
             .map(|option| {
                 let ass_id = option.attr("value").expect("Option did not have a value");
 
-                let querypath = format!("{}&ass_id={}", base_querypath, ass_id);
+                let querypath = format!("{base_querypath}&ass_id={ass_id}");
                 Reference::Unresolved(querypath)
             })
             .collect::<Vec<_>>();
@@ -63,7 +63,7 @@ impl IliasElement for GradePage {
     fn parse(element: ElementRef, _ilias_client: &IliasClient) -> Result<Self> {
         let selected_assignment_dropdown_selector = SELECTED_ASSIGNMENT_DROPDOWN_SELECTOR
             .get_or_init(|| {
-                Selector::parse("select#ass_id option[selected=\"selected\"]")
+                Selector::parse(r#"select#ass_id option[selected="selected"]"#)
                     .expect("Could not parse selector")
             });
         let toolbar_form_selector = TOOLBAR_FORM_SELECTOR
@@ -92,8 +92,8 @@ impl IliasElement for GradePage {
 
         let submissions = element
             .select(submission_row_selector)
-            .map(|row| GradeSubmission::parse(row))
-            .filter_map(|subm| subm.ok())
+            .map(GradeSubmission::parse)
+            .filter_map(Result::ok)
             .collect::<Vec<_>>();
 
         Ok(GradePage {

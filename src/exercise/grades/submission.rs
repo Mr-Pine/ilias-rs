@@ -44,12 +44,12 @@ impl GradeSubmission {
             let team_id = team_id
                 .trim()
                 .strip_prefix("(")
-                .context(anyhow!("Unexpected team id (no prefix '(') {}", team_id))?;
+                .context(anyhow!("Unexpected team id (no prefix '(') {team_id}"))?;
             let team_id = team_id
                 .strip_suffix(")")
-                .context(anyhow!("Unexpected team id (no suffix ')') {}", team_id))?;
+                .context(anyhow!("Unexpected team id (no suffix ')') {team_id}"))?;
 
-            format!("Team {}", team_id)
+            format!("Team {team_id}")
         } else {
             return Err(anyhow!("This submission style is not yet supported"));
         };
