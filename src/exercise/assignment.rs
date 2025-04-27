@@ -1,9 +1,9 @@
 use std::sync::OnceLock;
 
-use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Local};
 use reqwest::multipart::Form;
 use scraper::{selectable::Selectable, ElementRef, Selector};
+use snafu::{OptionExt, ResultExt, Whatever};
 
 use crate::reference::Reference;
 
@@ -47,7 +47,7 @@ impl IliasElement for Assignment {
         ))
     }
 
-    fn parse(element: ElementRef, _ilias_client: &IliasClient) -> Result<Self> {
+    fn parse(element: ElementRef, _ilias_client: &IliasClient) -> Result<Self, Whatever> {
         let name_selector = NAME_SELECTOR.get_or_init(|| {
             Selector::parse(".ilAssignmentHeader").expect("Could not parse selector")
         });
@@ -67,7 +67,7 @@ impl IliasElement for Assignment {
         let name = element
             .select(name_selector)
             .next()
-            .context("Did not find name")?
+            .whatever_context("Did not find name")?
             .text()
             .collect();
 
@@ -79,7 +79,9 @@ impl IliasElement for Assignment {
                     info_screen
                         .select(info_screen_name_selector)
                         .next()
-                        .context(anyhow!("Could not find name of info screen"))
+                        .whatever_context::<_, Whatever>(format!(
+                            "Could not find name of info screen"
+                        ))
                         .unwrap()
                         .text()
                         .collect::<String>(),
@@ -109,7 +111,7 @@ impl IliasElement for Assignment {
                     .contains(&name.as_str())
                     .then_some(*screen)
             })
-            .context("Did not find schedule")?;
+            .whatever_context("Did not find schedule")?;
         let submission_start_date =
             Self::get_value_for_keys(schedule_info, &["Startzeit", "Start Time"])
                 .ok()
@@ -211,7 +213,7 @@ impl Assignment {
     fn get_value_element_for_keys<'a>(
         info_screen: ElementRef<'a>,
         keys: &[&str],
-    ) -> Result<ElementRef<'a>> {
+    ) -> Result<ElementRef<'a>, Whatever> {
         let property_row_selector = PROPERTY_ROW_SELECTOR
             .get_or_init(|| Selector::parse(".form-group").expect("Could not parse selector"));
         let info_property_value_selector = INFO_PROPERTY_VALUE_SELECTOR.get_or_init(|| {
@@ -234,14 +236,15 @@ impl Assignment {
                         .as_str(),
                 )
             })
-            .context(anyhow!("Did not find {:?} property", keys))?
+            .whatever_context(format!("Did not find {:?} property", keys))?
             .select(info_property_value_selector)
             .next()
-            .context(anyhow!("Did not find value for {:?} property", keys))
+            .whatever_context(format!("Did not find value for {:?} property", keys))
     }
 
-    fn get_value_for_keys(info_screen: ElementRef, keys: &[&str]) -> Result<String> {
-        Ok(Self::get_value_element_for_keys(info_screen, keys)?
+    fn get_value_for_keys(info_screen: ElementRef, keys: &[&str]) -> Result<String, Whatever> {
+        Ok(Self::get_value_element_for_keys(info_screen, keys)
+            .whatever_context("Could not get key values")?
             .text()
             .collect())
     }
@@ -262,7 +265,7 @@ impl AssignmentSubmission {
     fn parse_submissions_page(
         submission_page: ElementRef,
         ilias_client: &IliasClient,
-    ) -> Result<AssignmentSubmission> {
+    ) -> Result<AssignmentSubmission, Whatever> {
         let upload_button_selector = UPLOAD_BUTTON_SELECTOR.get_or_init(|| {
             Selector::parse("nav div.navbar-header button").expect("Could not parse selector")
         });
@@ -326,26 +329,26 @@ impl AssignmentSubmission {
         let delete_querypath = submission_page
             .select(content_form_selector)
             .next()
-            .context("Did not find deltion form")?
+            .whatever_context("Did not find deltion form")?
             .value()
             .attr("action")
-            .context("Did not find action attribute")?
+            .whatever_context("Did not find action attribute")?
             .to_string();
 
         let upload_form_querypath = submission_page
             .select(upload_button_selector)
             .next()
-            .context("Did not find upload button")?
+            .whatever_context("Did not find upload button")?
             .attr("data-action")
-            .context("Did not find data-action on upload button")?;
+            .whatever_context("Did not find data-action on upload button")?;
         let upload_page = ilias_client.get_querypath(upload_form_querypath)?;
         let upload_querypath = upload_page
             .select(content_form_selector)
             .next()
-            .context("Did not find upload form")?
+            .whatever_context("Did not find upload form")?
             .value()
             .attr("action")
-            .context("Did not find action attribute")?
+            .whatever_context("Did not find action attribute")?
             .to_string();
 
         Ok(AssignmentSubmission {
@@ -355,7 +358,11 @@ impl AssignmentSubmission {
         })
     }
 
-    pub fn delete_files(&self, ilias_client: &IliasClient, files: &[&File]) -> Result<()> {
+    pub fn delete_files(
+        &self,
+        ilias_client: &IliasClient,
+        files: &[&File],
+    ) -> Result<(), Whatever> {
         let mut form_args = files
             .iter()
             .map(|&file| file.id.clone().expect("Files to delete must have an id"))
@@ -363,11 +370,17 @@ impl AssignmentSubmission {
             .collect::<Vec<_>>();
         form_args.push(("cmd[deleteDelivered]", String::from("Löschen")));
 
-        ilias_client.post_querypath_form(&self.delete_querypath, &form_args)?;
+        ilias_client
+            .post_querypath_form(&self.delete_querypath, &form_args)
+            .whatever_context("Could not post assignment deletion form")?;
         Ok(())
     }
 
-    pub fn upload_files(&self, ilias_client: &IliasClient, files: &[NamedLocalFile]) -> Result<()> {
+    pub fn upload_files(
+        &self,
+        ilias_client: &IliasClient,
+        files: &[NamedLocalFile],
+    ) -> Result<(), Whatever> {
         let mut form = Form::new();
 
         for (index, file_data) in files.iter().enumerate() {
@@ -381,7 +394,9 @@ impl AssignmentSubmission {
                 .text("ilfilehash", "aaaa");
         }
 
-        ilias_client.post_querypath_multipart(&self.upload_querypath, form)?;
+        ilias_client
+            .post_querypath_multipart(&self.upload_querypath, form)
+            .whatever_context("Could not post assignment upload form")?;
         Ok(())
         // TODO: Maybe push files to submission here
     }

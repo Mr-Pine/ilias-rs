@@ -1,10 +1,10 @@
 use std::{fmt::Display, sync::OnceLock};
 
-use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use reqwest::{multipart::Form, Url};
 use scraper::{element_ref::Select, selectable::Selectable, ElementRef, Selector};
 use serde::{Deserialize, Serialize};
+use snafu::{OptionExt, ResultExt, Whatever};
 
 use super::{
     client::IliasClient, file::File, local_file::NamedLocalFile, parse_date, IliasElement,
@@ -79,7 +79,7 @@ impl IliasElement for Folder {
         ))
     }
 
-    fn parse(element: ElementRef, ilias_client: &IliasClient) -> Result<Self> {
+    fn parse(element: ElementRef, ilias_client: &IliasClient) -> Result<Self, Whatever> {
         let name_selector = NAME_SELECTOR.get_or_init(|| {
             Selector::parse(".il-page-content-header").expect("Could not parse selector")
         });
@@ -102,27 +102,27 @@ impl IliasElement for Folder {
         let name = element
             .select(name_selector)
             .next()
-            .context("Could not find name")?
+            .whatever_context("Could not find name")?
             .text()
             .collect();
         let description = element
             .select(description_selector)
             .next()
-            .context("Could not find description")?
+            .whatever_context("Could not find description")?
             .text()
             .collect();
         let id = element
             .select(id_selector)
             .next()
-            .context("Could not find link in breadcrumbs")?
+            .whatever_context("Could not find link in breadcrumbs")?
             .attr("href")
-            .context("Link missing href attribute")?
+            .whatever_context("Link missing href attribute")?
             .to_string();
 
         let last_script = element
             .select(last_script_selector)
             .next()
-            .context("Did not find last script")?
+            .whatever_context("Did not find last script")?
             .text()
             .collect::<String>();
 
@@ -151,12 +151,16 @@ static CONTENT_FORM_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static SCRIPT_TAG_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 impl Folder {
-    pub fn upload_files(&self, ilias_client: &IliasClient, files: &[NamedLocalFile]) -> Result<()> {
+    pub fn upload_files(
+        &self,
+        ilias_client: &IliasClient,
+        files: &[NamedLocalFile],
+    ) -> Result<(), Whatever> {
         let upload_page = ilias_client.get_querypath(
             &self
                 .upload_page_querypath
                 .clone()
-                .context("No upload available for this folder")?,
+                .whatever_context("No upload available for this folder")?,
         )?;
         let upload_form_selector = CONTENT_FORM_SELECTOR.get_or_init(|| {
             Selector::parse("#ilContentContainer form").expect("Could not parse scraper")
@@ -410,14 +414,15 @@ impl FolderElement {
         }
     }
 
-    pub fn delete(&self, ilias_client: &IliasClient) -> Result<()> {
+    pub fn delete(&self, ilias_client: &IliasClient) -> Result<(), Whatever> {
         let deletion_querypath = self.deletion_querypath();
-        let delete_page = ilias_client
-            .get_querypath(
-                deletion_querypath
-                    .context(anyhow!("You can not delete this element: {}", self.name()))?,
-            )
-            .context(anyhow!("Error getting delete page for {:?}", self))?;
+        let delete_page =
+            ilias_client
+                .get_querypath(deletion_querypath.whatever_context(format!(
+                    "You can not delete this element: {}",
+                    self.name()
+                ))?)
+                .whatever_context(format!("Error getting delete page for {:?}", self))?;
 
         let form_selector = CONTENT_FORM_SELECTOR.get_or_init(|| {
             Selector::parse("#ilContentContainer form").expect("Could not parse scraper")
@@ -425,10 +430,10 @@ impl FolderElement {
         let confirm_querypath = delete_page
             .select(form_selector)
             .next()
-            .context("Could not find confirmation form")?
+            .whatever_context("Could not find confirmation form")?
             .value()
             .attr("action")
-            .context("Could not find action on form")?;
+            .whatever_context("Could not find action on form")?;
 
         let form_data = [
             ("id[]", self.id()),
@@ -437,7 +442,7 @@ impl FolderElement {
 
         ilias_client
             .post_querypath_form(confirm_querypath, &form_data)
-            .context(anyhow!(
+            .whatever_context(format!(
                 "Error while submitting delete confirmation for {:?}",
                 self
             ))?;

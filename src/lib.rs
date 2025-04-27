@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Days, Local, NaiveTime, TimeZone};
 use client::IliasClient;
 use regex::Regex;
 use reqwest::Url;
 use scraper::ElementRef;
+use snafu::{OptionExt, ResultExt, Whatever};
 
 pub mod client;
 pub mod exercise;
@@ -18,18 +18,19 @@ pub trait IliasElement: Sized {
     fn type_identifier() -> Option<&'static str>;
     fn querypath_from_id(id: &str) -> Option<String>;
 
-    fn parse(element: ElementRef, ilias_client: &IliasClient) -> Result<Self>;
+    fn parse(element: ElementRef, ilias_client: &IliasClient) -> Result<Self, Whatever>;
 }
 
-fn parse_date(date_string: &str) -> Result<DateTime<Local>> {
-    let (date, time) = date_string.split_once(',').context(anyhow!(
+fn parse_date(date_string: &str) -> Result<DateTime<Local>, Whatever> {
+    let (date, time) = date_string.split_once(',').whatever_context(format!(
         "Could not separate date and time in {}",
         date_string
     ))?;
     let date = date.trim();
     let time = time.trim();
 
-    let time = NaiveTime::parse_from_str(time, "%H:%M")?;
+    let time = NaiveTime::parse_from_str(time, "%H:%M")
+        .whatever_context(format!("Unable to parse ilias date: {time}"))?;
 
     let date = if ["Gestern", "Yesterday"].contains(&date) {
         Local::now() - Days::new(1)
@@ -53,16 +54,19 @@ fn parse_date(date_string: &str) -> Result<DateTime<Local>> {
             &["Dez", "Dec"],
         ];
 
-        let date_regex = Regex::new(r"^(?<day>\d+)\. (?<month>\w+) (?<year>\w+)$")?;
+        let date_regex = Regex::new(r"^(?<day>\d+)\. (?<month>\w+) (?<year>\w+)$")
+            .whatever_context("Could not parse regex")?;
         let date_split = date_regex
             .captures(date)
-            .context(anyhow!("Could not match date {}", date))?;
+            .whatever_context(format!("Could not match date {}", date))?;
         let (day, month, year) = (
             date_split.name("day").unwrap().as_str(),
             date_split.name("month").unwrap().as_str(),
             date_split.name("year").unwrap().as_str(),
         );
-        let day: u32 = day.parse()?;
+        let day: u32 = day
+            .parse()
+            .whatever_context(format!("Could not parse day: {day}"))?;
         let month = months
             .iter()
             .enumerate()
@@ -73,19 +77,21 @@ fn parse_date(date_string: &str) -> Result<DateTime<Local>> {
                     None
                 }
             })
-            .context(anyhow!("Could not parse month {}", month))?;
-        let year: i32 = year.parse()?;
+            .whatever_context(format!("Could not parse month {}", month))?;
+        let year: i32 = year
+            .parse()
+            .whatever_context(format!("Could not parse year: {year}"))?;
 
         Local
             .with_ymd_and_hms(year, month, day, 0, 0, 0)
             .earliest()
-            .context("Could not construct date")?
+            .whatever_context("Could not construct date")?
     };
 
     let datetime = date
         .with_time(time)
         .earliest()
-        .context("Could not set time")?;
+        .whatever_context("Could not set time")?;
     Ok(datetime)
 }
 

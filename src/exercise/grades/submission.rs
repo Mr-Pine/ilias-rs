@@ -1,9 +1,9 @@
 use std::sync::OnceLock;
 
-use anyhow::{anyhow, Context, Result};
 use log::debug;
 use reqwest::multipart::Form;
 use scraper::{selectable::Selectable, ElementRef, Selector};
+use snafu::{whatever, OptionExt, ResultExt, Whatever};
 
 use crate::{
     client::{AddFileWithFilename, IliasClient},
@@ -24,7 +24,7 @@ static UPLOAD_FEEDBACK_FORM_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 impl GradeSubmission {
     /// Construct a submission from it's table row element.
-    pub fn parse(element: ElementRef) -> Result<GradeSubmission> {
+    pub fn parse(element: ElementRef) -> Result<GradeSubmission, Whatever> {
         let dropdown_action_selector = DROPDOWN_ACTION_SELECTOR.get_or_init(|| {
             Selector::parse(".dropdown-menu button").expect("Could not parse selector")
         });
@@ -36,7 +36,7 @@ impl GradeSubmission {
             .select(dropdown_action_selector)
             .filter_map(|button| button.attr("data-action"))
             .find(|&querypath| querypath.contains("cmd=listFiles"))
-            .context("Did not find file feedback querypath")?
+            .whatever_context("Did not find file feedback querypath")?
             .to_string();
 
         let identifier = if let Some(team_id_element) = element.select(team_id_selector).next() {
@@ -44,14 +44,14 @@ impl GradeSubmission {
             let team_id = team_id
                 .trim()
                 .strip_prefix("(")
-                .context(anyhow!("Unexpected team id (no prefix '(') {team_id}"))?;
+                .whatever_context(format!("Unexpected team id (no prefix '(') {}", team_id))?;
             let team_id = team_id
                 .strip_suffix(")")
-                .context(anyhow!("Unexpected team id (no suffix ')') {team_id}"))?;
+                .whatever_context(format!("Unexpected team id (no suffix ')') {}", team_id))?;
 
             format!("Team {team_id}")
         } else {
-            return Err(anyhow!("This submission style is not yet supported"));
+            whatever!("This submission style is not yet supported");
         };
 
         Ok(GradeSubmission {
@@ -60,7 +60,7 @@ impl GradeSubmission {
         })
     }
 
-    pub fn upload(&self, file: NamedLocalFile, ilias_client: &IliasClient) -> Result<()> {
+    pub fn upload(&self, file: NamedLocalFile, ilias_client: &IliasClient) -> Result<(), Whatever> {
         debug!("Uploading {:?} to {:?}", file, self);
         let upload_feedback_form_selector = UPLOAD_FEEDBACK_FORM_SELECTOR.get_or_init(|| {
             Selector::parse(".ilToolbarContainer form").expect("Could not parse selector")
@@ -71,9 +71,9 @@ impl GradeSubmission {
         let submit_querypath = upload_page
             .select(upload_feedback_form_selector)
             .next()
-            .context("Did not find form to upload feedback")?
+            .whatever_context("Did not find form to upload feedback")?
             .attr("action")
-            .context("Form did not have action")?;
+            .whatever_context("Form did not have action")?;
 
         debug!("Got submit querypath {}", submit_querypath);
 
@@ -85,7 +85,9 @@ impl GradeSubmission {
             )?
             .text("cmd[uploadFile]", "Hochladen");
 
-        ilias_client.post_querypath_multipart(submit_querypath, form)?;
+        ilias_client
+            .post_querypath_multipart(submit_querypath, form)
+            .whatever_context("Could not send submission form")?;
         Ok(())
     }
 }

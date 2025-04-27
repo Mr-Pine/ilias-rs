@@ -1,9 +1,9 @@
 use std::{path::Path, sync::OnceLock};
 
-use anyhow::{Context, Result};
 use base64::Engine;
 use regex::Regex;
 use scraper::{selectable::Selectable, ElementRef, Html, Selector};
+use snafu::{OptionExt, ResultExt, Whatever};
 use submission::GradeSubmission;
 
 use crate::{client::IliasClient, reference::Reference, IliasElement};
@@ -18,7 +18,7 @@ pub struct Grades {
 static ASS_ID_OPTION_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 impl Grades {
-    pub fn parse(element: ElementRef, base_querypath: &str) -> Result<Self> {
+    pub fn parse(element: ElementRef, base_querypath: &str) -> Result<Self, Whatever> {
         let ass_id_option_selector = ASS_ID_OPTION_SELECTOR.get_or_init(|| {
             Selector::parse("select#ass_id>option").expect("Could not parrse selector")
         });
@@ -60,7 +60,7 @@ impl IliasElement for GradePage {
         None
     }
 
-    fn parse(element: ElementRef, _ilias_client: &IliasClient) -> Result<Self> {
+    fn parse(element: ElementRef, _ilias_client: &IliasClient) -> Result<Self, Whatever> {
         let selected_assignment_dropdown_selector = SELECTED_ASSIGNMENT_DROPDOWN_SELECTOR
             .get_or_init(|| {
                 Selector::parse(r#"select#ass_id option[selected="selected"]"#)
@@ -75,19 +75,19 @@ impl IliasElement for GradePage {
         let assignment_selection = element
             .select(selected_assignment_dropdown_selector)
             .next()
-            .context("Did not find selected assignment in dropdown")?;
+            .whatever_context("Did not find selected assignment in dropdown")?;
         let ass_id = assignment_selection
             .attr("value")
-            .context("Dropdown entry did not have a value")?
+            .whatever_context("Dropdown entry did not have a value")?
             .to_string();
         let name = assignment_selection.text().collect();
 
         let toolbar_form_querypath = element
             .select(toolbar_form_selector)
             .next()
-            .context("Did not find toolbar form")?
+            .whatever_context("Did not find toolbar form")?
             .attr("action")
-            .context("Toolbar form had no action")?
+            .whatever_context("Toolbar form had no action")?
             .to_string();
 
         let submissions = element
@@ -112,7 +112,7 @@ impl GradePage {
         &self,
         ilias_client: &IliasClient,
         to: &Path,
-    ) -> Result<()> {
+    ) -> Result<(), Whatever> {
         let form_data = [
             ("ass_id", self.ass_id.as_str()),
             ("user_login", ""),
@@ -123,7 +123,8 @@ impl GradePage {
         let html = Html::parse_document(&ilias_client.get_text(response)?);
 
         let notification_item_button_selector = NOTIFICATION_ITEM_BUTTON_SELECTOR.get_or_init(|| Selector::parse(".il-aggregate-notifications .il-notification-item .media-body .il-item-notification-title button").expect("Could not parse selector"));
-        let from_url_regex = Regex::new("from_url=(?<url>[^&]+)&")?;
+        let from_url_regex =
+            Regex::new("from_url=(?<url>[^&]+)&").whatever_context("Unable to parse regex")?;
         let dowload_querypath = html
             .select(notification_item_button_selector)
             .map(|button| button.attr("data-action").expect("Button had no action"))
@@ -142,7 +143,7 @@ impl GradePage {
                     None
                 }
             })
-            .context("Could not find download querypath")?;
+            .whatever_context("Could not find download querypath")?;
 
         ilias_client.download_file(dowload_querypath, to)?;
 

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use snafu::{whatever, ResultExt, Whatever};
 
 use crate::{client::IliasClient, IliasElement};
 
@@ -26,14 +26,16 @@ impl<T> Reference<T> {
 }
 
 impl<T: IliasElement> Reference<T> {
-    pub fn resolve(&self, ilias_client: &IliasClient) -> Result<T> {
+    pub fn resolve(&self, ilias_client: &IliasClient) -> Result<T, Whatever> {
         let querypath = match self {
-            Self::Unavailable => return Err(anyhow!("Reference unavailable")),
-            Self::Resolved(_) => return Err(anyhow!("Already resolved")),
+            Self::Unavailable => whatever!("Reference unavailable"),
+            Self::Resolved(_) => whatever!("Already resolved"),
             Self::Unresolved(querypath) => querypath,
         };
 
-        let element = ilias_client.get_querypath(querypath)?;
+        let element = ilias_client
+            .get_querypath(querypath)
+            .whatever_context("Could not get querypath from element")?;
         T::parse(element.root_element(), ilias_client)
     }
 }

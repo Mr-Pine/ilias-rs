@@ -1,10 +1,10 @@
 use std::sync::OnceLock;
 
-use anyhow::{Context, Result};
 use assignment::Assignment;
 use grades::Grades;
 use regex::Regex;
 use scraper::{selectable::Selectable, ElementRef, Selector};
+use snafu::{OptionExt, Whatever};
 
 pub mod assignment;
 pub mod grades;
@@ -40,7 +40,7 @@ impl IliasElement for Exercise {
         ))
     }
 
-    fn parse(element: ElementRef, ilias_client: &IliasClient) -> Result<Exercise> {
+    fn parse(element: ElementRef, ilias_client: &IliasClient) -> Result<Exercise, Whatever> {
         let name_selector = NAME_SELECTOR.get_or_init(|| {
             Selector::parse(".il-page-content-header").expect("Could not parse scraper")
         });
@@ -60,13 +60,13 @@ impl IliasElement for Exercise {
         let name = element
             .select(name_selector)
             .next()
-            .context(r#"No "name" Element found"#)?
+            .whatever_context(r#"No "name" Element found"#)?
             .text()
             .collect();
         let description = element
             .select(description_selector)
             .next()
-            .context(r#"No "description" Element found"#)?
+            .whatever_context(r#"No "description" Element found"#)?
             .text()
             .collect();
         let grades_tab_querypath = element.select(grades_tab_selector).next().map(|link| {
