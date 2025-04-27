@@ -293,7 +293,8 @@ impl AssignmentSubmission {
             Selector::parse("#ilContentContainer form tbody tr").expect("Could not parse selector")
         });
         let upload_querypath_regex = UPLOAD_QUERYPATH_REGEX.get_or_init(|| {
-            Regex::new(r#"'(?P<querypath>ilias\.php\?[a-zA-Z=&0-9:_]+cmd=upload[a-zA-Z=&0-9:_]+)'"#).expect("Could not parse regex")
+            Regex::new(r#"'(?P<querypath>ilias\.php\?[a-zA-Z=&0-9:_]+cmd=upload[a-zA-Z=&0-9:_]+)'"#)
+                .expect("Could not parse regex")
         });
 
         let file_rows = submission_page.select(file_row_selector);
@@ -364,8 +365,16 @@ impl AssignmentSubmission {
             .whatever_context("Did not find data-action on upload button")?;
         debug!("Upload form querypath: {}", upload_form_querypath);
         let upload_page = ilias_client.get_querypath(upload_form_querypath)?;
-        let script = upload_page.select(source_tag_selector).next().whatever_context("Missing script with upload path")?.text().collect::<String>();
-        let upload_querypath = upload_querypath_regex.captures(&script).whatever_context("Could not find upload querypath")?["querypath"].to_string();
+        let script = upload_page
+            .select(source_tag_selector)
+            .next()
+            .whatever_context("Missing script with upload path")?
+            .text()
+            .collect::<String>();
+        let upload_querypath = upload_querypath_regex
+            .captures(&script)
+            .whatever_context("Could not find upload querypath")?["querypath"]
+            .to_string();
         debug!("Upload querypath: {}", upload_querypath);
 
         Ok(AssignmentSubmission {

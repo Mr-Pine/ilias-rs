@@ -1,6 +1,6 @@
 use std::{fmt::Display, sync::OnceLock};
 
-use log::debug;
+use log::{debug, info};
 use regex::Regex;
 use reqwest::{multipart::Form, Url};
 use scraper::{element_ref::Select, selectable::Selectable, ElementRef, Selector};
@@ -479,9 +479,7 @@ impl FolderElement {
             .whatever_context("Could not find action on form")?;
         debug!("Delete confirm querypath: {}", confirm_querypath);
 
-        let form_data = [
-            ("form/input_0", self.id()),
-        ];
+        let form_data = [("form/input_0", self.id())];
 
         ilias_client
             .post_querypath_form(confirm_querypath, &form_data)
@@ -489,7 +487,7 @@ impl FolderElement {
                 "Error while submitting delete confirmation for {:?}",
                 self
             ))?;
-        println!(
+        info!(
             "Deleted {} via deletion querypath {:?}",
             self.id(),
             deletion_querypath
