@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use chrono::{DateTime, Local};
 use log::debug;
+use regex::Regex;
 use reqwest::multipart::Form;
 use scraper::{selectable::Selectable, ElementRef, Selector};
 use snafu::{OptionExt, ResultExt, Whatever};
@@ -57,12 +58,13 @@ impl IliasElement for Assignment {
         let panel_body_selector = PANEL_BODY_SELECTOR
             .get_or_init(|| Selector::parse(".panel-body").expect("Could not parse selector"));
 
-        let submission_page_selector = SUBMISSION_PAGE_SELECTOR
-            .get_or_init(|| Selector::parse("#tab_submission > a").expect("Could not parse selector"));
+        let submission_page_selector = SUBMISSION_PAGE_SELECTOR.get_or_init(|| {
+            Selector::parse("#tab_submission > a").expect("Could not parse selector")
+        });
         let property_row_selector = PROPERTY_ROW_SELECTOR.get_or_init(|| {
             Selector::parse(".il-multi-line-cap-3").expect("Could not parse selector")
         });
-        let file_row_selector = FILE_ROW_SELECTOR
+        let attachment_row_selector = ATTACHMENT_ROW_SELECTOR
             .get_or_init(|| Selector::parse(".row").expect("Could not parse selector"));
 
         let name: String = element
@@ -133,7 +135,7 @@ impl IliasElement for Assignment {
                 .unwrap_or(false)
         });
         let attachments = if let Some(panel) = attachment_panel {
-            let file_rows: Vec<_> = panel.select(file_row_selector).collect();
+            let file_rows: Vec<_> = panel.select(attachment_row_selector).collect();
             let mut attachments = vec![];
 
             for row in &file_rows[0..file_rows.len() - 2] {
@@ -149,7 +151,6 @@ impl IliasElement for Assignment {
                     .next()
                     .and_then(|div| div.child_elements().next())
                     .and_then(|p| p.child_elements().next());
-                dbg!(&download_querypath);
                 let download_querypath = download_querypath
                     .whatever_context("Did not find download querypath for attachment")?
                     .attr("href")
@@ -172,10 +173,8 @@ impl IliasElement for Assignment {
         };
         debug!("Attachments: {attachments:?}");
 
-        let submission_page_querypath = element
-            .select(submission_page_selector)
-            .next()
-            .and_then(|link|    link.attr("href"))
+        let submission_page_querypath = dbg!(detail_page.select(submission_page_selector).next())
+            .and_then(|link| link.attr("href"))
             .map(|querypath| querypath.to_string());
 
         Ok(Assignment {
@@ -198,25 +197,29 @@ impl Assignment {
                 .map_or(true, |date| date <= Local::now())
     }
 
-    pub fn get_submission(&mut self, ilias_client: &IliasClient) -> Option<&AssignmentSubmission> {
+    pub fn get_submission(
+        &mut self,
+        ilias_client: &IliasClient,
+    ) -> Result<Option<&AssignmentSubmission>, Whatever> {
         let submission = &mut self.submission;
-        match submission {
+        let res = match submission {
             Reference::Unavailable => None,
             Reference::Resolved(ref submission) => Some(submission),
             Reference::Unresolved(querypath) => {
                 let ass_sub = AssignmentSubmission::parse_submissions_page(
                     ilias_client
                         .get_querypath(querypath)
-                        .expect("Could not get submission page")
+                        .whatever_context("Could not get submission page")?
                         .root_element(),
                     ilias_client,
                 )
-                .expect("Could not parse submission page");
+                .whatever_context("Could not parse submission page")?;
                 *submission = Reference::Resolved(ass_sub);
 
                 submission.try_get_resolved()
             }
-        }
+        };
+        Ok(res)
     }
 
     fn get_value_element_for_keys<'a>(
@@ -268,6 +271,9 @@ pub struct AssignmentSubmission {
 static UPLOAD_BUTTON_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static CONTENT_FORM_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static FILE_ROW_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static SOURCE_TAG_SELECTOR: OnceLock<Selector> = OnceLock::new();
+
+static UPLOAD_QUERYPATH_REGEX: OnceLock<Regex> = OnceLock::new();
 
 impl AssignmentSubmission {
     fn parse_submissions_page(
@@ -275,72 +281,79 @@ impl AssignmentSubmission {
         ilias_client: &IliasClient,
     ) -> Result<AssignmentSubmission, Whatever> {
         let upload_button_selector = UPLOAD_BUTTON_SELECTOR.get_or_init(|| {
-            Selector::parse("nav div.navbar-header button").expect("Could not parse selector")
+            Selector::parse(".navbar-form button").expect("Could not parse selector")
         });
         let content_form_selector = CONTENT_FORM_SELECTOR.get_or_init(|| {
             Selector::parse("div#ilContentContainer form").expect("Could not parse selector")
         });
-        let file_row_selector = FILE_ROW_SELECTOR
-            .get_or_init(|| Selector::parse("form tbody tr").expect("Could not parse selector"));
+        let source_tag_selector = SOURCE_TAG_SELECTOR.get_or_init(|| {
+            Selector::parse("body > script:not([src])").expect("Could not parse selector")
+        });
+        let file_row_selector = FILE_ROW_SELECTOR.get_or_init(|| {
+            Selector::parse("#ilContentContainer form tbody tr").expect("Could not parse selector")
+        });
+        let upload_querypath_regex = UPLOAD_QUERYPATH_REGEX.get_or_init(|| {
+            Regex::new(r#"'(?P<querypath>ilias\.php\?[a-zA-Z=&0-9:_]+cmd=upload[a-zA-Z=&0-9:_]+)'"#).expect("Could not parse regex")
+        });
 
         let file_rows = submission_page.select(file_row_selector);
-        let uploaded_files = file_rows
-            .filter(|&row| row.child_elements().count() > 1)
-            .map(|file_row| {
-                let mut children = file_row.child_elements();
+        let mut uploaded_files = vec![];
+        for row in file_rows.filter(|&row| row.child_elements().count() > 1) {
+            let mut children = row.child_elements();
 
-                let id = children
-                    .next()
-                    .expect("Did not find first column in table")
-                    .child_elements()
-                    .next()
-                    .expect("Did not find checkbox")
-                    .attr("value")
-                    .expect("Did not find id");
-                let file_name = children
-                    .next()
-                    .expect("Did not find second column")
-                    .text()
-                    .collect();
-                let submission_date = loop {
-                    let parsed_date = parse_date(
-                        &children
-                            .next()
-                            .expect("Did not find date column")
-                            .text()
-                            .collect::<String>(),
-                    );
-                    match parsed_date {
-                        Ok(date) => break date,
-                        _ => continue,
-                    }
-                };
-                let download_querypath = children
-                    .last()
-                    .expect("Did not find last column")
-                    .child_elements()
-                    .next()
-                    .expect("Did not find download link")
-                    .attr("href")
-                    .expect("Did not find href attribute");
-
-                File {
-                    id: Some(id.to_string()),
-                    name: file_name,
-                    description: String::new(),
-                    date: Some(submission_date),
-                    download_querypath: Some(download_querypath.to_string()),
+            let id = children
+                .next()
+                .whatever_context("Did not find first column in table")?
+                .child_elements()
+                .next()
+                .whatever_context("Did not find checkbox")?
+                .attr("value")
+                .whatever_context("Did not find id")?;
+            let file_name = children
+                .next()
+                .whatever_context("Did not find second column")?
+                .text()
+                .collect();
+            let submission_date = loop {
+                let parsed_date = parse_date(
+                    &children
+                        .next()
+                        .whatever_context("Did not find date column")?
+                        .text()
+                        .collect::<String>(),
+                );
+                match parsed_date {
+                    Ok(date) => break date,
+                    _ => continue,
                 }
-            })
-            .collect();
+            };
+            let download_querypath = children
+                .last()
+                .whatever_context("Did not find last column")?
+                .child_elements()
+                .next()
+                .whatever_context("Did not find download link")?
+                .attr("href")
+                .whatever_context("Did not find href attribute")?;
+
+            let file = File {
+                id: Some(id.to_string()),
+                name: file_name,
+                description: String::new(),
+                date: Some(submission_date),
+                download_querypath: Some(download_querypath.to_string()),
+            };
+
+            uploaded_files.push(file);
+        }
 
         let delete_querypath = submission_page
             .select(content_form_selector)
             .next()
-            .whatever_context("Did not find deltion form")?
+            .whatever_context("Did not find deletion form")?
             .value()
             .attr("action")
-            .whatever_context("Did not find action attribute")?
+            .whatever_context("Did not find action attribute for delete querypath")?
             .to_string();
 
         let upload_form_querypath = submission_page
@@ -349,15 +362,11 @@ impl AssignmentSubmission {
             .whatever_context("Did not find upload button")?
             .attr("data-action")
             .whatever_context("Did not find data-action on upload button")?;
+        debug!("Upload form querypath: {}", upload_form_querypath);
         let upload_page = ilias_client.get_querypath(upload_form_querypath)?;
-        let upload_querypath = upload_page
-            .select(content_form_selector)
-            .next()
-            .whatever_context("Did not find upload form")?
-            .value()
-            .attr("action")
-            .whatever_context("Did not find action attribute")?
-            .to_string();
+        let script = upload_page.select(source_tag_selector).next().whatever_context("Missing script with upload path")?.text().collect::<String>();
+        let upload_querypath = upload_querypath_regex.captures(&script).whatever_context("Could not find upload querypath")?["querypath"].to_string();
+        debug!("Upload querypath: {}", upload_querypath);
 
         Ok(AssignmentSubmission {
             submissions: uploaded_files,
@@ -401,6 +410,8 @@ impl AssignmentSubmission {
                 .text("cmd[uploadFile]", "Hochladen")
                 .text("ilfilehash", "aaaa");
         }
+        debug!("Form: {:?}", form);
+        debug!("Upload querypath: {}", self.upload_querypath);
 
         ilias_client
             .post_querypath_multipart(&self.upload_querypath, form)
