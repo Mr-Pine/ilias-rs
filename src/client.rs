@@ -96,6 +96,12 @@ impl IliasClient {
             .whatever_context("Could not get json from response")?)
     }
 
+    pub fn is_alert_response(&self, response: Response) -> Result<bool, Whatever> {
+        let html = Html::parse_document(&self.get_text(response)?);
+        let selector = Selector::parse(".alert-danger").whatever_context("Could not parse selector")?;
+        Ok(html.select(&selector).next().is_some())
+    }
+
     pub fn post_querypath_multipart(
         &self,
         querypath: &str,

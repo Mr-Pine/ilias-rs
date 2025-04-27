@@ -1,10 +1,11 @@
 use std::{fmt::Display, sync::OnceLock};
 
+use log::debug;
 use regex::Regex;
 use reqwest::{multipart::Form, Url};
 use scraper::{element_ref::Select, selectable::Selectable, ElementRef, Selector};
 use serde::{Deserialize, Serialize};
-use snafu::{OptionExt, ResultExt, Whatever};
+use snafu::{whatever, OptionExt, ResultExt, Whatever};
 
 use super::{
     client::IliasClient, file::File, local_file::NamedLocalFile, parse_date, IliasElement,
@@ -73,7 +74,7 @@ impl IliasElement for Folder {
 
     fn querypath_from_id(id: &str) -> Option<String> {
         Some(format!(
-            "goto.php?target={}_{}&client_id=produktiv",
+            "goto.php/{}/{}",
             Self::type_identifier().unwrap(),
             id
         ))
@@ -156,6 +157,10 @@ impl Folder {
         ilias_client: &IliasClient,
         files: &[NamedLocalFile],
     ) -> Result<(), Whatever> {
+        debug!(
+            "Uploading files: {:?} to {:?}",
+            files, &self.upload_page_querypath
+        );
         let upload_page = ilias_client.get_querypath(
             &self
                 .upload_page_querypath
@@ -176,6 +181,7 @@ impl Folder {
             .value()
             .attr("action")
             .unwrap();
+        debug!("Finish upload querypath: {}", finish_upload_querypath);
 
         let relevant_script_tag = upload_page
             .select(script_tag_selector)
@@ -186,10 +192,11 @@ impl Folder {
 
         let path_regex =
             Regex::new(r".*il\.UI\.Input\.File\.init\([^']*'[^']*',[^']*'(?<querypath>[^']+)'.*")
-                .expect("cursed regex lol");
+                .whatever_context("Could not parse cursed regex lol")?;
         let upload_querypath = &path_regex
             .captures(&relevant_script_tag)
-            .expect("no match found :()")["querypath"];
+            .whatever_context("No match for upload querypath found :(")?["querypath"];
+        debug!("Upload querypath: {}", upload_querypath);
 
         for file_data in files {
             let form = Form::new().part(
@@ -199,15 +206,25 @@ impl Folder {
 
             let response = ilias_client.post_querypath_multipart(upload_querypath, form)?;
             let response: IliasUploadResponse = ilias_client.get_json(response)?;
+            debug!("Upload response: {response:?}");
             let file_id = response.file_id;
 
             let finish_form = Form::new()
-                .text("form/input_0[input_1][]", file_data.name.clone())
-                .text("form/input_0[input_2][]", "")
-                .text("form/input_0[input_3][]", file_id)
+                .text("form/input_0[input_1][]", file_data.name.clone()) // Filename
+                .text("form/input_0[input_2][]", "") // Description
+                .text("form/input_0[input_3][]", file_id) // File id
+                .text("form/input_1", "7") // License: All rights reserved
                 .percent_encode_noop();
 
-            ilias_client.post_querypath_multipart(finish_upload_querypath, finish_form)?;
+            let response =
+                ilias_client.post_querypath_multipart(finish_upload_querypath, finish_form)?;
+            debug!("Finish upload response: {:?}", response);
+            if ilias_client
+                .is_alert_response(response)
+                .whatever_context("Could not check error state of response")?
+            {
+                whatever!("Upload response has an error, please check if the file was uploaded and report")
+            }
         }
 
         Ok(())

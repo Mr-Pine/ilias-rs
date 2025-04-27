@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.91"
 base64 = "0.22.1"
 chrono = "0.4.38"
 log = "0.4.22"
