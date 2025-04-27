@@ -2,9 +2,10 @@ use std::sync::OnceLock;
 
 use assignment::Assignment;
 use grades::Grades;
+use log::debug;
 use regex::Regex;
 use scraper::{selectable::Selectable, ElementRef, Selector};
-use snafu::{OptionExt, Whatever};
+use snafu::{OptionExt, ResultExt, Whatever};
 
 pub mod assignment;
 pub mod grades;
@@ -24,6 +25,7 @@ static ASSIGNMENT_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static NAME_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static DESCRIPTION_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static GRADES_TAB_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static DEFAULT_MODE_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 static BASE_GRADES_QUERYPATH_REGEX: OnceLock<Regex> = OnceLock::new();
 
@@ -42,20 +44,31 @@ impl IliasElement for Exercise {
 
     fn parse(element: ElementRef, ilias_client: &IliasClient) -> Result<Exercise, Whatever> {
         let name_selector = NAME_SELECTOR.get_or_init(|| {
-            Selector::parse(".il-page-content-header").expect("Could not parse scraper")
+            Selector::parse(".il-page-content-header").expect("Could not parse selector")
         });
         let description_selector = DESCRIPTION_SELECTOR
-            .get_or_init(|| Selector::parse(".ilHeaderDesc").expect("Could not parse scraper"));
+            .get_or_init(|| Selector::parse(".ilHeaderDesc").expect("Could not parse selector"));
         let assignment_selector = ASSIGNMENT_SELECTOR.get_or_init(|| {
-            Selector::parse("div.il_VAccordionContainer div.il_VAccordionInnerContainer")
-                .expect("Could not parse scraper")
+            Selector::parse("#ilContentContainer .il-item").expect("Could not parse selector")
         });
         let grades_tab_selector = GRADES_TAB_SELECTOR.get_or_init(|| {
-            Selector::parse(".nav-tabs #tab_grades a").expect("Could not parse scraper")
+            Selector::parse(".nav-tabs #tab_grades a").expect("Could not parse selector")
+        });
+        let default_mode_selector = DEFAULT_MODE_SELECTOR.get_or_init(|| {
+            Selector::parse(
+                r#"[aria-label="--exc_mode_selection--"] :first-child[aria-pressed="true"]"#,
+            )
+            .expect("Could not parse selector")
         });
 
         let base_grades_querypath_regex = BASE_GRADES_QUERYPATH_REGEX
             .get_or_init(|| Regex::new(r".*ref_id=\d+").expect("Could not parse regex"));
+
+        if element.select(default_mode_selector).next().is_some() {
+            debug!(
+                "Exercise has not selected all submissions, only active submissions will be parsed"
+            );
+        }
 
         let name = element
             .select(name_selector)
@@ -81,12 +94,13 @@ impl IliasElement for Exercise {
                 .to_string();
             base_querypath
         });
-        let assignments = element
-            .select(assignment_selector)
-            .map(|assignment| {
-                Assignment::parse(assignment, ilias_client).expect("Could not parse assignment")
-            })
-            .collect();
+        let mut assignments = vec![];
+        for assignment in element.select(assignment_selector) {
+            let assignment = Assignment::parse(assignment, ilias_client)
+                .whatever_context("Could not parse assignment")?;
+            assignments.push(assignment);
+        }
+        debug!("Assignments: {:?}", assignments);
 
         Ok(Exercise {
             name,

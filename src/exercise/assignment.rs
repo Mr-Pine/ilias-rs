@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use chrono::{DateTime, Local};
+use log::debug;
 use reqwest::multipart::Form;
 use scraper::{selectable::Selectable, ElementRef, Selector};
 use snafu::{OptionExt, ResultExt, Whatever};
@@ -20,155 +21,162 @@ pub struct Assignment {
     pub name: String,
     pub instructions: Option<String>,
     pub submission_start_date: Option<DateTime<Local>>,
-    pub submission_end_date: DateTime<Local>,
+    pub submission_end_date: Option<DateTime<Local>>,
     pub attachments: Vec<File>,
     submission: Reference<AssignmentSubmission>,
 }
 
-static INFO_SCREEN_SELECTOR: OnceLock<Selector> = OnceLock::new();
-static INFO_SCREEN_NAME_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static PANEL_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static PANEL_NAME_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static PANEL_BODY_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 static NAME_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static PROPERTY_ROW_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static ATTACHMENT_ROW_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static SUBMISSION_PAGE_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static INFO_PROPERTY_VALUE_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static INFO_PROPERTY_KEY_SELECTOR: OnceLock<Selector> = OnceLock::new();
-static PROPERTY_ROW_SELECTOR: OnceLock<Selector> = OnceLock::new();
-static SUBMISSION_PAGE_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 impl IliasElement for Assignment {
     fn type_identifier() -> Option<&'static str> {
         Some("ass")
     }
 
-    fn querypath_from_id(id: &str) -> Option<String> {
-        Some(format!(
-            "goto.php?target={}_{}&client_id=produktiv",
-            Self::type_identifier().unwrap(),
-            id
-        ))
+    fn querypath_from_id(_: &str) -> Option<String> {
+        None
     }
 
-    fn parse(element: ElementRef, _ilias_client: &IliasClient) -> Result<Self, Whatever> {
+    fn parse(element: ElementRef, ilias_client: &IliasClient) -> Result<Self, Whatever> {
         let name_selector = NAME_SELECTOR.get_or_init(|| {
-            Selector::parse(".ilAssignmentHeader").expect("Could not parse selector")
+            Selector::parse(".il-item-title > a").expect("Could not parse selector")
         });
+        let panel_selector = PANEL_SELECTOR
+            .get_or_init(|| Selector::parse(".panel.panel-sub").expect("Could not parse selector"));
+        let panel_name_selector = PANEL_NAME_SELECTOR
+            .get_or_init(|| Selector::parse("h3").expect("Could not parse selector"));
+        let panel_body_selector = PANEL_BODY_SELECTOR
+            .get_or_init(|| Selector::parse(".panel-body").expect("Could not parse selector"));
 
-        let info_screen_selector = INFO_SCREEN_SELECTOR
-            .get_or_init(|| Selector::parse(".ilInfoScreenSec").expect("Could not parse selector"));
-        let info_screen_name_selector = INFO_SCREEN_NAME_SELECTOR
-            .get_or_init(|| Selector::parse(".ilHeader").expect("Could not parse selector"));
-        let info_property_value_selector = INFO_PROPERTY_VALUE_SELECTOR.get_or_init(|| {
-            Selector::parse(".il_InfoScreenPropertyValue").expect("Could not parse selector")
-        });
-        let property_row_selector = PROPERTY_ROW_SELECTOR
-            .get_or_init(|| Selector::parse(".form-group").expect("Could not parse selector"));
         let submission_page_selector = SUBMISSION_PAGE_SELECTOR
-            .get_or_init(|| Selector::parse("a").expect("Could not parse selector"));
+            .get_or_init(|| Selector::parse("#tab_submission > a").expect("Could not parse selector"));
+        let property_row_selector = PROPERTY_ROW_SELECTOR.get_or_init(|| {
+            Selector::parse(".il-multi-line-cap-3").expect("Could not parse selector")
+        });
+        let file_row_selector = FILE_ROW_SELECTOR
+            .get_or_init(|| Selector::parse(".row").expect("Could not parse selector"));
 
-        let name = element
+        let name: String = element
             .select(name_selector)
             .next()
             .whatever_context("Did not find name")?
             .text()
             .collect();
+        debug!("Assignment name: {name}");
 
-        let info_screens: Vec<_> = element
-            .select(info_screen_selector)
-            .map(|info_screen| {
-                (
-                    info_screen,
-                    info_screen
-                        .select(info_screen_name_selector)
-                        .next()
-                        .whatever_context::<_, Whatever>(format!(
-                            "Could not find name of info screen"
-                        ))
-                        .unwrap()
-                        .text()
-                        .collect::<String>(),
-                )
-            })
-            .collect();
+        let properties: Vec<_> = element.select(property_row_selector).collect();
+        debug!("Properties: {properties:?}");
 
-        let instruction_info = info_screens.iter().find_map(|(screen, name)| {
-            ["Arbeitsanweisung", "Work Instructions"]
-                .contains(&name.as_str())
-                .then_some(screen)
-        });
-        let instructions = instruction_info.and_then(|instruction_info| {
-            Some(
-                instruction_info
-                    .select(info_property_value_selector)
-                    .next()?
-                    .text()
-                    .collect(),
-            )
-        });
-
-        let schedule_info = info_screens
-            .iter()
-            .find_map(|(screen, name)| {
-                ["Schedule", "Terminplan"]
-                    .contains(&name.as_str())
-                    .then_some(*screen)
-            })
-            .whatever_context("Did not find schedule")?;
         let submission_start_date =
-            Self::get_value_for_keys(schedule_info, &["Startzeit", "Start Time"])
+            Self::get_value_for_keys(&properties, &["Startzeit", "Start Time"])
                 .ok()
                 .map(|date| parse_date(date.trim()))
                 .transpose()?;
         let submission_end_date =
-            Self::get_value_for_keys(schedule_info, &["Abgabetermin", "Edit Until"])
-                .or_else(|_| Self::get_value_for_keys(schedule_info, &["Beendet am", "Ended On"]))
-                .and_then(|date| parse_date(date.trim()))?;
-        let attachment_info = info_screens.iter().find_map(|(screen, name)| {
-            ["Dateien", "Files"]
-                .contains(&name.as_str())
-                .then_some(screen)
-        });
-        let attachments = attachment_info.map_or(vec![], |attachment_info| {
-            let file_rows = attachment_info.select(property_row_selector);
-            file_rows
-                .map(|file_row| {
-                    let mut children = file_row.child_elements();
-                    let filename = children
-                        .next()
-                        .expect("Did not find filename")
-                        .text()
-                        .collect();
-                    let download_link = children
-                        .next()
-                        .expect("Did not find download button")
-                        .child_elements()
-                        .next()
-                        .expect("Did not find download link")
-                        .attr("href")
-                        .expect("Did not find download href");
+            Self::get_value_for_keys(&properties, &["Abgabetermin", "Edit Until"])
+                .or_else(|_| Self::get_value_for_keys(&properties, &["Beendet am", "Ended On"]))
+                .and_then(|date| parse_date(date.trim()))
+                .ok();
+        debug!("Start: {submission_start_date:?}; End: {submission_end_date:?}");
 
-                    File {
-                        name: filename,
-                        description: "".to_string(),
-                        download_querypath: Some(download_link.to_string()),
-                        date: None,
-                        id: None,
-                    }
+        let detail_querypath = element
+            .select(name_selector)
+            .next()
+            .whatever_context("Did not find name element for detail querypath")?
+            .attr("href")
+            .whatever_context("Could not get href attr for detail querypath")?;
+        let detail_page = ilias_client
+            .get_querypath(detail_querypath)
+            .whatever_context("Could not get detail html")?;
+
+        let panels: Vec<_> = detail_page.select(panel_selector).collect();
+
+        let instruction_panel = panels.iter().find(|panel| {
+            panel
+                .select(panel_name_selector)
+                .next()
+                .map(|name| {
+                    ["Arbeitsanweisung", "Work Instructions"]
+                        .contains(&name.text().collect::<String>().as_str())
                 })
-                .collect()
+                .unwrap_or(false)
         });
+        let instructions = if let Some(panel) = instruction_panel {
+            let body = panel
+                .select(panel_body_selector)
+                .next()
+                .and_then(|body| body.child_elements().next())
+                .and_then(|body| body.child_elements().next())
+                .whatever_context("Could not get body for instruction panel")?;
+            Some(body.text().collect::<String>().trim().to_string())
+        } else {
+            None
+        };
+        debug!("Instructions: {instructions:?}");
 
-        let submission_info = info_screens.iter().find_map(|(screen, name)| {
-            ["Ihre Einreichung", "Your Submission"]
-                .contains(&name.as_str())
-                .then_some(*screen)
+        let attachment_panel = panels.iter().find(|panel| {
+            panel
+                .select(panel_name_selector)
+                .next()
+                .map(|name| {
+                    ["Dateien", "Files"].contains(&name.text().collect::<String>().as_str())
+                })
+                .unwrap_or(false)
         });
-        let submission_page_querypath = submission_info
-            .and_then(|info| {
-                Self::get_value_element_for_keys(info, &["Abgegebene Dateien", "Submitted Files"])
-                    .ok()
-            })
-            .and_then(|info| info.select(submission_page_selector).next())
-            .map(|link| link.attr("href").expect("Could not find href in link"))
-            .map(ToOwned::to_owned);
+        let attachments = if let Some(panel) = attachment_panel {
+            let file_rows: Vec<_> = panel.select(file_row_selector).collect();
+            let mut attachments = vec![];
+
+            for row in &file_rows[0..file_rows.len() - 2] {
+                let mut children = row.child_elements();
+                let filename = children
+                    .next()
+                    .whatever_context("Could not get attachment filename")?
+                    .text()
+                    .collect::<String>()
+                    .trim()
+                    .to_string();
+                let download_querypath = children
+                    .next()
+                    .and_then(|div| div.child_elements().next())
+                    .and_then(|p| p.child_elements().next());
+                dbg!(&download_querypath);
+                let download_querypath = download_querypath
+                    .whatever_context("Did not find download querypath for attachment")?
+                    .attr("href")
+                    .whatever_context("Did not find download href for attachment")?;
+
+                let file = File {
+                    name: filename,
+                    description: "".to_string(),
+                    download_querypath: Some(download_querypath.to_string()),
+                    date: None,
+                    id: None,
+                };
+
+                attachments.push(file);
+            }
+
+            attachments
+        } else {
+            vec![]
+        };
+        debug!("Attachments: {attachments:?}");
+
+        let submission_page_querypath = element
+            .select(submission_page_selector)
+            .next()
+            .and_then(|link|    link.attr("href"))
+            .map(|querypath| querypath.to_string());
 
         Ok(Assignment {
             name,
@@ -183,7 +191,8 @@ impl IliasElement for Assignment {
 
 impl Assignment {
     pub fn is_active(&self) -> bool {
-        self.submission_end_date >= Local::now()
+        self.submission_end_date
+            .map_or(true, |date| date >= Local::now())
             && self
                 .submission_start_date
                 .map_or(true, |date| date <= Local::now())
@@ -211,20 +220,18 @@ impl Assignment {
     }
 
     fn get_value_element_for_keys<'a>(
-        info_screen: ElementRef<'a>,
+        properties: &[ElementRef<'a>],
         keys: &[&str],
     ) -> Result<ElementRef<'a>, Whatever> {
-        let property_row_selector = PROPERTY_ROW_SELECTOR
-            .get_or_init(|| Selector::parse(".form-group").expect("Could not parse selector"));
         let info_property_value_selector = INFO_PROPERTY_VALUE_SELECTOR.get_or_init(|| {
-            Selector::parse(".il_InfoScreenPropertyValue").expect("Could not parse selector")
+            Selector::parse(".il-item-property-value").expect("Could not parse selector")
         });
         let info_property_key_selector = INFO_PROPERTY_KEY_SELECTOR.get_or_init(|| {
-            Selector::parse(".il_InfoScreenProperty").expect("Could not parse selector")
+            Selector::parse(".il-item-property-name").expect("Could not parse selector")
         });
 
-        info_screen
-            .select(property_row_selector)
+        let property_row = properties
+            .iter()
             .find(|&element| {
                 keys.contains(
                     &element
@@ -236,13 +243,14 @@ impl Assignment {
                         .as_str(),
                 )
             })
-            .whatever_context(format!("Did not find {:?} property", keys))?
+            .whatever_context(format!("Did not find {:?} property", keys))?;
+        property_row
             .select(info_property_value_selector)
             .next()
             .whatever_context(format!("Did not find value for {:?} property", keys))
     }
 
-    fn get_value_for_keys(info_screen: ElementRef, keys: &[&str]) -> Result<String, Whatever> {
+    fn get_value_for_keys(info_screen: &[ElementRef], keys: &[&str]) -> Result<String, Whatever> {
         Ok(Self::get_value_element_for_keys(info_screen, keys)
             .whatever_context("Could not get key values")?
             .text()
