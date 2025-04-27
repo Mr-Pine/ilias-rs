@@ -42,7 +42,7 @@ pub enum FolderElement {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct Folder {
     name: String,
@@ -93,9 +93,8 @@ impl IliasElement for Folder {
             Selector::parse("#il-add-new-item-gl #file").expect("Could not parse selector")
         });
 
-        let element_selector = ELEMENT_SELECTOR.get_or_init(|| {
-            Selector::parse(".ilContainerListItemContent").expect("Could not parse selector")
-        });
+        let element_selector = ELEMENT_SELECTOR
+            .get_or_init(|| Selector::parse(".ilObjListRow").expect("Could not parse selector"));
         let last_script_selector = LAST_SCRIPT_SELECTOR.get_or_init(|| {
             Selector::parse("body script:last-child").expect("Could not parse selector")
         });
@@ -105,7 +104,9 @@ impl IliasElement for Folder {
             .next()
             .whatever_context("Could not find name")?
             .text()
-            .collect();
+            .collect::<String>()
+            .trim()
+            .to_string();
         let description = element
             .select(description_selector)
             .next()
@@ -127,10 +128,12 @@ impl IliasElement for Folder {
             .text()
             .collect::<String>();
 
-        let elements: Vec<FolderElement> = element
-            .select(element_selector)
-            .filter_map(|element| FolderElement::parse(element, &last_script, ilias_client))
-            .collect();
+        let mut elements: Vec<FolderElement> = vec![];
+        for element in element.select(element_selector) {
+            let folder_element = FolderElement::parse(element, &last_script, ilias_client)
+                .whatever_context("Could not parse folder element")?;
+            elements.push(folder_element);
+        }
 
         let upload_page_querypath = element
             .select(upload_file_page_selector)
@@ -138,17 +141,21 @@ impl IliasElement for Folder {
             .and_then(|link| link.attr("href"))
             .map(str::to_string);
 
-        Ok(Folder {
+        let folder = Folder {
             name,
             description,
             id,
             elements,
             upload_page_querypath,
-        })
+        };
+        debug!("Folder: {:?}", folder);
+
+        Ok(folder)
     }
 }
 
 static CONTENT_FORM_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static CONFIRM_BUTTON_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static SCRIPT_TAG_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 impl Folder {
@@ -242,7 +249,7 @@ impl FolderElement {
         element: ElementRef,
         folder_script: &str,
         ilias_client: &IliasClient,
-    ) -> Option<FolderElement> {
+    ) -> Result<FolderElement, Whatever> {
         let element_name_selector = ELEMENT_NAME_SELECTOR.get_or_init(|| {
             Selector::parse(".il_ContainerItemTitle a").expect("Could not parse selector")
         });
@@ -251,21 +258,33 @@ impl FolderElement {
         let element_property_selector = ELEMENT_PROPERTY_SELECTOR
             .get_or_init(|| Selector::parse(".il_ItemProperty").expect("Could not parse selector"));
 
-        let name_element = element.select(element_name_selector).next()?;
-        let description_element = element.select(element_description_selector).next()?;
+        let name_element = element
+            .select(element_name_selector)
+            .next()
+            .whatever_context("Did not find name")?;
+        let description_element = element
+            .select(element_description_selector)
+            .next()
+            .whatever_context("Could not get description")?;
         let mut properties = element.select(element_property_selector);
 
         let name: String = name_element.text().collect();
-        let link = name_element.attr("href")?;
+        let link = name_element
+            .attr("href")
+            .whatever_context("Could not get link")?;
         let description = description_element.text().collect();
         let querypath = Url::parse(link)
             .expect("Could not parse link")
             .get_querypath();
 
-        let id = Regex::new(r"ref_id=(?<id>\d+)|target=file_(?<file_id>\d+)")
-            .ok()?
+        let id = Regex::new(r"(ref_id=|target=file_|exc/)(?<id>\d+)")
+            .whatever_context("Could not parse regex")?
             .captures(&querypath)
-            .and_then(|capture| capture.name("id").or(capture.name("file_id")))?
+            .and_then(|capture| capture.name("id"))
+            .whatever_context(format!(
+                "Could not get id captures from querypath {}",
+                querypath
+            ))?
             .as_str()
             .to_string();
 
@@ -315,8 +334,12 @@ impl FolderElement {
         id: String,
         deletion_querypath: Option<String>,
         properties: &mut Select<'_, '_>,
-    ) -> Option<FolderElement> {
-        if querypath.contains("target=file_") {
+    ) -> Result<FolderElement, Whatever> {
+        debug!("Querypath: {}", querypath);
+        if querypath.contains("target=file_")
+            || (querypath.contains("baseClass=ilrepositorygui")
+                && querypath.contains("cmd=sendfile"))
+        {
             let extension: String = properties
                 .next()
                 .expect("Could not find file extension")
@@ -325,16 +348,13 @@ impl FolderElement {
                 .trim()
                 .to_string();
             let date = loop {
-                let next_property = properties.next();
-                match next_property {
-                    Some(property) => {
-                        let date = parse_date(&property.text().collect::<String>());
-                        match date {
-                            Ok(date) => break Some(date),
-                            Err(_) => continue,
-                        }
-                    }
-                    None => break None,
+                let next_property = properties
+                    .next()
+                    .whatever_context("No date properties left")?;
+                let date = parse_date(&next_property.text().collect::<String>());
+                match date {
+                    Ok(date) => break Some(date),
+                    Err(_) => continue,
                 }
             };
 
@@ -352,7 +372,7 @@ impl FolderElement {
                 download_querypath: Some(querypath),
             };
 
-            Some(FolderElement::File {
+            Ok(FolderElement::File {
                 file,
                 deletion_querypath,
             })
@@ -360,7 +380,7 @@ impl FolderElement {
             && querypath.contains("cmd=forward")
             && querypath.contains("forwardCmd=showContent")
         {
-            Some(FolderElement::Opencast {
+            Ok(FolderElement::Opencast {
                 name,
                 description,
                 id,
@@ -370,12 +390,19 @@ impl FolderElement {
         } else if querypath.contains("baseClass=ilrepositorygui") && querypath.contains("cmd=view")
         {
             let id = Regex::new(r"ref_id=(?<id>\d+)")
-                .ok()?
-                .captures(&querypath)?
-                .name("id")?
-                .as_str()
+                .whatever_context("Could not parse regex")?
+                .captures(&querypath)
+                .whatever_context("Could not extract id")?["id"]
                 .to_string();
-            Some(FolderElement::Viewable {
+            Ok(FolderElement::Viewable {
+                name,
+                description,
+                id,
+                querypath,
+                deletion_querypath,
+            })
+        } else if querypath.contains("/exc/") {
+            Ok(FolderElement::Exercise {
                 name,
                 description,
                 id,
@@ -383,7 +410,7 @@ impl FolderElement {
                 deletion_querypath,
             })
         } else {
-            None
+            whatever!("Could not get folder element")
         }
     }
 
@@ -441,20 +468,19 @@ impl FolderElement {
                 ))?)
                 .whatever_context(format!("Error getting delete page for {:?}", self))?;
 
-        let form_selector = CONTENT_FORM_SELECTOR.get_or_init(|| {
-            Selector::parse("#ilContentContainer form").expect("Could not parse scraper")
+        let confirm_button_selector = CONFIRM_BUTTON_SELECTOR.get_or_init(|| {
+            Selector::parse(".il-layout-page-content>.modal form").expect("Could not parse scraper")
         });
         let confirm_querypath = delete_page
-            .select(form_selector)
+            .select(confirm_button_selector)
             .next()
             .whatever_context("Could not find confirmation form")?
-            .value()
             .attr("action")
             .whatever_context("Could not find action on form")?;
+        debug!("Delete confirm querypath: {}", confirm_querypath);
 
         let form_data = [
-            ("id[]", self.id()),
-            ("cmd[confirmedDelete]", "I fucking hate ILIAS"),
+            ("form/input_0", self.id()),
         ];
 
         ilias_client
