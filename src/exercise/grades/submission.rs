@@ -25,6 +25,7 @@ static SIGNIN_NAME_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static NAME_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 static UPLOAD_FEEDBACK_FORM_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static POST_UPLOAD_FEEDBACK_FORM_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static UPLOAD_POST_SCRIPT_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static UPLOAD_POST_REGEX: OnceLock<Regex> = OnceLock::new();
 
@@ -47,7 +48,10 @@ impl GradeSubmission {
         let feedback_querypath = element
             .select(dropdown_action_selector)
             .filter_map(|button| button.attr("data-action"))
-            .find(|&querypath| querypath.contains("cmdClass=ilResourceCollectionGUI"))
+            .find(|&querypath| {
+                querypath.contains("cmdClass=ilResourceCollectionGUI")
+                    || querypath.contains("cmd=listFiles")
+            })
             .whatever_context("Did not find file feedback querypath")?
             .to_string();
 
@@ -84,8 +88,10 @@ impl GradeSubmission {
     pub fn upload(&self, file: NamedLocalFile, ilias_client: &IliasClient) -> Result<(), Whatever> {
         debug!("Uploading {:?} to {:?}", file, self);
         let upload_feedback_form_selector = UPLOAD_FEEDBACK_FORM_SELECTOR.get_or_init(|| {
-            Selector::parse(".modal-body form").expect("Could not parse selector")
+            Selector::parse(".ilToolbarContainer form").expect("Could not parse selector")
         });
+        let post_upload_feedback_form_selector = POST_UPLOAD_FEEDBACK_FORM_SELECTOR
+            .get_or_init(|| Selector::parse(".modal-body form").expect("Could not parse selector"));
         let upload_post_script_selector = UPLOAD_POST_SCRIPT_SELECTOR.get_or_init(|| {
             Selector::parse("body script:last-child").expect("Could not parse selector")
         });
@@ -94,50 +100,79 @@ impl GradeSubmission {
                 .expect("Could not parse cursed regex lol")
         });
 
-        debug!("Querypath for upload form: {}", self.file_feedback_querypath);
+        debug!(
+            "Querypath for upload form: {}",
+            self.file_feedback_querypath
+        );
         let upload_page = ilias_client.get_querypath(&self.file_feedback_querypath)?;
 
-        let script_element = upload_page.select(upload_post_script_selector)
+        let script_element = upload_page
+            .select(upload_post_script_selector)
             .next()
             .whatever_context("Did not find script that contains upload post querypath")?;
         let script = script_element.text().collect::<String>();
-        let upload_querypath = &upload_post_regex
-            .captures(&script)
-            .whatever_context("No match for upload querypath found :(")?["querypath"];
+        let upload_querypath_captures = &upload_post_regex.captures(&script);
 
-        debug!("Got upload querypath {}", upload_querypath);
+        if let Some(upload_querypath_captures) = upload_querypath_captures {
+            let upload_querypath = &upload_querypath_captures["querypath"];
 
-        let post_upload_querypath = upload_page
-            .select(upload_feedback_form_selector)
-            .next()
-            .whatever_context("Did not find form to upload feedback")?
-            .attr("action")
-            .whatever_context("Form did not have action")?;
+            debug!("Got upload querypath {}", upload_querypath);
 
-        debug!("Got post upload querypath {}", post_upload_querypath);
+            let post_upload_querypath = upload_page
+                .select(post_upload_feedback_form_selector)
+                .next()
+                .whatever_context("Did not find form to upload feedback")?
+                .attr("action")
+                .whatever_context("Form did not have action")?;
 
-        let form = Form::new()
-            .file_with_name(
-                "new_file",
-                ilias_client.construct_file_part(&file.path),
-                file.name.clone(),
-            )?
-            .text("cmd[uploadFile]", "Hochladen");
+            debug!("Got post upload querypath {}", post_upload_querypath);
 
-        #[derive(Deserialize)]
-        struct UploadResponse {
-            status: usize,
-            message: String,
-            resource_id: String
-        }
+            let form = Form::new()
+                .file_with_name(
+                    "new_file",
+                    ilias_client.construct_file_part(&file.path),
+                    file.name.clone(),
+                )?
+                .text("cmd[uploadFile]", "Hochladen");
 
-        let response = ilias_client
-            .post_querypath_multipart(upload_querypath, form)
-            .whatever_context("Could not send submission form")?
-            .error_for_status().whatever_context("Ilias returned an error")?;
-        let response = ilias_client.get_json::<UploadResponse>(response).whatever_context("Could not deserialize upload response")?;
-        if response.status != 1 {
-            whatever!("Error response for feedback upload")
+            #[derive(Deserialize)]
+            #[allow(dead_code)]
+            struct UploadResponse {
+                status: usize,
+                message: String,
+                resource_id: String,
+            }
+
+            let response = ilias_client
+                .post_querypath_multipart(upload_querypath, form)
+                .whatever_context("Could not send submission form")?
+                .error_for_status()
+                .whatever_context("Ilias returned an error")?;
+            let response = ilias_client
+                .get_json::<UploadResponse>(response)
+                .whatever_context("Could not deserialize upload response")?;
+            if response.status != 1 {
+                whatever!("Error response for feedback upload")
+            }
+        } else {
+            let upload_querypath = upload_page
+                .select(upload_feedback_form_selector)
+                .next()
+                .whatever_context("Did not find form to upload feedback")?
+                .attr("action")
+                .whatever_context("Form did not have action")?;
+
+            let form = Form::new()
+                .file_with_name(
+                    "new_file",
+                    ilias_client.construct_file_part(&file.path),
+                    file.name.clone(),
+                )?
+                .text("cmd[uploadFile]", "Hochladen");
+
+            ilias_client
+                .post_querypath_multipart(upload_querypath, form)
+                .whatever_context("Could not send submission form")?;
         }
         Ok(())
     }
