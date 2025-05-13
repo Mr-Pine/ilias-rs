@@ -2,11 +2,11 @@ use std::{path::Path, sync::OnceLock};
 
 use base64::Engine;
 use regex::Regex;
-use scraper::{selectable::Selectable, ElementRef, Html, Selector};
+use scraper::{ElementRef, Html, Selector, selectable::Selectable};
 use snafu::{OptionExt, ResultExt, Whatever};
 use submission::GradeSubmission;
 
-use crate::{client::IliasClient, reference::Reference, IliasElement};
+use crate::{IliasElement, client::IliasClient, reference::Reference};
 
 pub mod submission;
 
@@ -92,8 +92,11 @@ impl IliasElement for GradePage {
 
         let mut submissions = vec![];
         for submission_element in element.select(submission_row_selector) {
-            let submission = GradeSubmission::parse(submission_element).whatever_context("Could not parse submission")?;
-            submissions.push(submission);
+            if let Some(submission) = GradeSubmission::parse(submission_element)
+                .whatever_context("Could not parse submission")?
+            {
+                submissions.push(submission);
+            }
         }
 
         Ok(GradePage {

@@ -31,7 +31,7 @@ static UPLOAD_POST_REGEX: OnceLock<Regex> = OnceLock::new();
 
 impl GradeSubmission {
     /// Construct a submission from it's table row element.
-    pub fn parse(element: ElementRef) -> Result<GradeSubmission, Whatever> {
+    pub fn parse(element: ElementRef) -> Result<Option<GradeSubmission>, Whatever> {
         let dropdown_action_selector = DROPDOWN_ACTION_SELECTOR.get_or_init(|| {
             Selector::parse(".dropdown-menu button").expect("Could not parse selector")
         });
@@ -47,6 +47,10 @@ impl GradeSubmission {
 
         let identifier = if let Some(team_id_element) = element.select(team_id_selector).next() {
             let team_id = team_id_element.text().collect::<String>();
+            if !team_id.contains("(") && !team_id.contains(")") {
+                debug!("Unassiged user");
+                return Ok(None);
+            }
             let team_id = team_id
                 .trim()
                 .strip_prefix("(")
@@ -76,13 +80,15 @@ impl GradeSubmission {
                 querypath.contains("cmdClass=ilResourceCollectionGUI")
                     || querypath.contains("cmd=listFiles")
             })
-            .whatever_context(format!("Did not find file feedback querypath for {identifier}"))?
+            .whatever_context(format!(
+                "Did not find file feedback querypath for {identifier}"
+            ))?
             .to_string();
 
-        Ok(GradeSubmission {
+        Ok(Some(GradeSubmission {
             identifier,
             file_feedback_querypath: feedback_querypath,
-        })
+        }))
     }
 
     pub fn upload(&self, file: NamedLocalFile, ilias_client: &IliasClient) -> Result<(), Whatever> {
