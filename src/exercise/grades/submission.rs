@@ -45,16 +45,6 @@ impl GradeSubmission {
             Selector::parse("td:nth-child(2).std").expect("Could not parse selector")
         });
 
-        let feedback_querypath = element
-            .select(dropdown_action_selector)
-            .filter_map(|button| button.attr("data-action"))
-            .find(|&querypath| {
-                querypath.contains("cmdClass=ilResourceCollectionGUI")
-                    || querypath.contains("cmd=listFiles")
-            })
-            .whatever_context("Did not find file feedback querypath")?
-            .to_string();
-
         let identifier = if let Some(team_id_element) = element.select(team_id_selector).next() {
             let team_id = team_id_element.text().collect::<String>();
             let team_id = team_id
@@ -78,6 +68,16 @@ impl GradeSubmission {
         } else {
             whatever!("This submission style is not yet supported");
         };
+
+        let feedback_querypath = element
+            .select(dropdown_action_selector)
+            .filter_map(|button| button.attr("data-action"))
+            .find(|&querypath| {
+                querypath.contains("cmdClass=ilResourceCollectionGUI")
+                    || querypath.contains("cmd=listFiles")
+            })
+            .whatever_context(format!("Did not find file feedback querypath for {identifier}"))?
+            .to_string();
 
         Ok(GradeSubmission {
             identifier,
