@@ -173,7 +173,7 @@ impl IliasElement for Assignment {
         };
         debug!("Attachments: {attachments:?}");
 
-        let submission_page_querypath = dbg!(detail_page.select(submission_page_selector).next())
+        let submission_page_querypath = detail_page.select(submission_page_selector).next()
             .and_then(|link| link.attr("href"))
             .map(|querypath| querypath.to_string());
 
@@ -204,7 +204,7 @@ impl Assignment {
         let submission = &mut self.submission;
         let res = match submission {
             Reference::Unavailable => None,
-            Reference::Resolved(ref submission) => Some(submission),
+            &mut Reference::Resolved(ref submission) => Some(submission),
             Reference::Unresolved(querypath) => {
                 let ass_sub = AssignmentSubmission::parse_submissions_page(
                     ilias_client

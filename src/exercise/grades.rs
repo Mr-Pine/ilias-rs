@@ -90,11 +90,11 @@ impl IliasElement for GradePage {
             .whatever_context("Toolbar form had no action")?
             .to_string();
 
-        let submissions = element
-            .select(submission_row_selector)
-            .map(GradeSubmission::parse)
-            .filter_map(Result::ok)
-            .collect::<Vec<_>>();
+        let mut submissions = vec![];
+        for submission_element in element.select(submission_row_selector) {
+            let submission = GradeSubmission::parse(submission_element).whatever_context("Could not parse submission")?;
+            submissions.push(submission);
+        }
 
         Ok(GradePage {
             name,

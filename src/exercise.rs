@@ -52,7 +52,7 @@ impl IliasElement for Exercise {
             Selector::parse("#ilContentContainer .il-item").expect("Could not parse selector")
         });
         let grades_tab_selector = GRADES_TAB_SELECTOR.get_or_init(|| {
-            Selector::parse(".nav-tabs #tab_grades a").expect("Could not parse selector")
+            Selector::parse("#tab_grades a").expect("Could not parse selector")
         });
         let default_mode_selector = DEFAULT_MODE_SELECTOR.get_or_init(|| {
             Selector::parse(
@@ -82,18 +82,20 @@ impl IliasElement for Exercise {
             .whatever_context(r#"No "description" Element found"#)?
             .text()
             .collect();
-        let grades_tab_querypath = element.select(grades_tab_selector).next().map(|link| {
-            let querypath = link
+        let grades_tab_querypath = if let Some(grades_link) = element.select(grades_tab_selector).next() {
+            let querypath = grades_link
                 .attr("href")
-                .expect("Did not find href on grades tab link")
+                .whatever_context("Did not find href on grades tab link")?
                 .to_string();
             let base_querypath = base_grades_querypath_regex
                 .find(&querypath)
-                .unwrap_or_else(|| panic!("Grades querypath {querypath} had unexpected format"))
+                .whatever_context(format!("Grades querypath {querypath} had unexpected format"))?
                 .as_str()
                 .to_string();
-            base_querypath
-        });
+            Some(base_querypath)
+        } else {
+            None
+        };
         let mut assignments = vec![];
         for assignment in element.select(assignment_selector) {
             let assignment = Assignment::parse(assignment, ilias_client)
@@ -116,7 +118,7 @@ impl Exercise {
         let grades = &mut self.grades;
         match grades {
             Reference::Unavailable => None,
-            Reference::Resolved(ref grades) => Some(grades),
+            &mut Reference::Resolved(ref grades) => Some(grades),
             Reference::Unresolved(querypath) => {
                 let ass_sub = Grades::parse(
                     ilias_client
