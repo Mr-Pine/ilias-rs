@@ -72,7 +72,7 @@ impl GradeSubmission {
         } else {
             whatever!("This submission style is not yet supported");
         };
-            let identifier  = identifier.replace("Ä", "Ae").replace("ä", "ae").replace("Ü","Ue").replace("ü","ue").replace("Ö","Oe").replace("ö","oe").replace("ß","ss");
+        let identifier  = identifier.replace("Ä", "Ae").replace("ä", "ae").replace("Ü","Ue").replace("ü","ue").replace("Ö","Oe").replace("ö","oe").replace("ß","ss");
 
         let feedback_querypath = element
             .select(dropdown_action_selector)
