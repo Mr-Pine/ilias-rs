@@ -1,4 +1,4 @@
-use std::{path::Path, sync::OnceLock};
+use std::{fmt::Display, path::Path, sync::OnceLock};
 
 use base64::Engine;
 use regex::Regex;
@@ -150,6 +150,47 @@ impl GradePage {
 
         ilias_client.download_file(dowload_querypath, to)?;
 
+        Ok(())
+    }
+
+    pub fn update_points(
+        &self,
+        ilias_client: &IliasClient,
+        changed_submissions: &Vec<GradeSubmission>,
+    ) -> Result<(), Whatever> {
+        let mut form_data = vec![
+            ("flt_status".to_string(), "".to_string()),
+            ("flt_subm".to_string(), "".to_string()),
+            ("flt_subm_after".to_string(), "".to_string()),
+            ("flt_subm_before".to_string(), "".to_string()),
+            ("tblfsexc_mem[]".to_string(), "login".to_string()),
+            ("tblfsexc_mem[]".to_string(), "submission".to_string()),
+            ("tblfsexc_mem[]".to_string(), "idl".to_string()),
+            ("tblfsexc_mem[]".to_string(), "mark".to_string()),
+            ("tblfshexc_mem".to_string(), "1".to_string()),
+            ("tbltplcrt".to_string(), "".to_string()),
+            ("selected_cmd".to_string(), "saveStatusSelected".to_string()),
+            (
+                "selected_cmd2".to_string(),
+                "saveStatusSelected".to_string(),
+            ),
+            ("select_cmd2".to_string(), "Ausführen".to_string()),
+        ];
+        for submission in changed_submissions {
+            form_data.push(("sel_part_ids[]".to_string(), submission.ilias_id.clone()));
+            form_data.push(("listed_part_ids[]".to_string(), submission.ilias_id.clone()));
+            form_data.push((
+                format!("status[{}]", &submission.ilias_id),
+                "notgraded".to_string(),
+            ));
+            form_data.push((
+                format!("mark[{}]", &submission.ilias_id),
+                submission.points.clone(),
+            ));
+        }
+        debugln!("{:?}", form_data);
+        let response =
+            ilias_client.post_querypath_form(&self.toolbar_form_querypath, &form_data)?;
         Ok(())
     }
 }
