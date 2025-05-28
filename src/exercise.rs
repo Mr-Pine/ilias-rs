@@ -4,13 +4,13 @@ use assignment::Assignment;
 use grades::Grades;
 use log::debug;
 use regex::Regex;
-use scraper::{selectable::Selectable, ElementRef, Selector};
+use scraper::{ElementRef, Selector, selectable::Selectable};
 use snafu::{OptionExt, ResultExt, Whatever};
 
 pub mod assignment;
 pub mod grades;
 
-use super::{client::IliasClient, reference::Reference, IliasElement};
+use super::{IliasElement, client::IliasClient, reference::Reference};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -51,9 +51,8 @@ impl IliasElement for Exercise {
         let assignment_selector = ASSIGNMENT_SELECTOR.get_or_init(|| {
             Selector::parse("#ilContentContainer .il-item").expect("Could not parse selector")
         });
-        let grades_tab_selector = GRADES_TAB_SELECTOR.get_or_init(|| {
-            Selector::parse("#tab_grades a").expect("Could not parse selector")
-        });
+        let grades_tab_selector = GRADES_TAB_SELECTOR
+            .get_or_init(|| Selector::parse("#tab_grades a").expect("Could not parse selector"));
         let default_mode_selector = DEFAULT_MODE_SELECTOR.get_or_init(|| {
             Selector::parse(
                 r#"[aria-label="--exc_mode_selection--"] :first-child[aria-pressed="true"]"#,
@@ -82,20 +81,23 @@ impl IliasElement for Exercise {
             .whatever_context(r#"No "description" Element found"#)?
             .text()
             .collect();
-        let grades_tab_querypath = if let Some(grades_link) = element.select(grades_tab_selector).next() {
-            let querypath = grades_link
-                .attr("href")
-                .whatever_context("Did not find href on grades tab link")?
-                .to_string();
-            let base_querypath = base_grades_querypath_regex
-                .find(&querypath)
-                .whatever_context(format!("Grades querypath {querypath} had unexpected format"))?
-                .as_str()
-                .to_string();
-            Some(base_querypath)
-        } else {
-            None
-        };
+        let grades_tab_querypath =
+            if let Some(grades_link) = element.select(grades_tab_selector).next() {
+                let querypath = grades_link
+                    .attr("href")
+                    .whatever_context("Did not find href on grades tab link")?
+                    .to_string();
+                let base_querypath = base_grades_querypath_regex
+                    .find(&querypath)
+                    .whatever_context(format!(
+                        "Grades querypath {querypath} had unexpected format"
+                    ))?
+                    .as_str()
+                    .to_string();
+                Some(base_querypath)
+            } else {
+                None
+            };
         let mut assignments = vec![];
         for assignment in element.select(assignment_selector) {
             let assignment = Assignment::parse(assignment, ilias_client)

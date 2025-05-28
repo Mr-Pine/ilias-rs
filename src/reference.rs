@@ -1,6 +1,6 @@
-use snafu::{whatever, ResultExt, Whatever};
+use snafu::{ResultExt, Whatever, whatever};
 
-use crate::{client::IliasClient, IliasElement};
+use crate::{IliasElement, client::IliasClient};
 
 #[derive(Debug)]
 pub enum Reference<T> {

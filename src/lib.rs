@@ -23,8 +23,7 @@ pub trait IliasElement: Sized {
 
 fn parse_date(date_string: &str) -> Result<DateTime<Local>, Whatever> {
     let (date, time) = date_string.split_once(',').whatever_context(format!(
-        "Could not separate date and time in {}",
-        date_string
+        "Could not separate date and time in {date_string}"
     ))?;
     let date = date.trim();
     let time = time.trim();
@@ -58,7 +57,7 @@ fn parse_date(date_string: &str) -> Result<DateTime<Local>, Whatever> {
             .whatever_context("Could not parse regex")?;
         let date_split = date_regex
             .captures(date)
-            .whatever_context(format!("Could not match date {}", date))?;
+            .whatever_context(format!("Could not match date {date}"))?;
         let (day, month, year) = (
             date_split.name("day").unwrap().as_str(),
             date_split.name("month").unwrap().as_str(),
@@ -77,7 +76,7 @@ fn parse_date(date_string: &str) -> Result<DateTime<Local>, Whatever> {
                     None
                 }
             })
-            .whatever_context(format!("Could not parse month {}", month))?;
+            .whatever_context(format!("Could not parse month {month}"))?;
         let year: i32 = year
             .parse()
             .whatever_context(format!("Could not parse year: {year}"))?;

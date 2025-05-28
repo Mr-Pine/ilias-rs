@@ -4,16 +4,17 @@ use chrono::{DateTime, Local};
 use log::debug;
 use regex::Regex;
 use reqwest::multipart::Form;
-use scraper::{selectable::Selectable, ElementRef, Selector};
+use scraper::{ElementRef, Selector, selectable::Selectable};
 use snafu::{OptionExt, ResultExt, Whatever};
 
 use crate::reference::Reference;
 
 use super::super::{
+    IliasElement,
     client::{AddFileWithFilename, IliasClient},
     file::File,
     local_file::NamedLocalFile,
-    parse_date, IliasElement,
+    parse_date,
 };
 
 #[derive(Debug)]
@@ -173,7 +174,9 @@ impl IliasElement for Assignment {
         };
         debug!("Attachments: {attachments:?}");
 
-        let submission_page_querypath = detail_page.select(submission_page_selector).next()
+        let submission_page_querypath = detail_page
+            .select(submission_page_selector)
+            .next()
             .and_then(|link| link.attr("href"))
             .map(|querypath| querypath.to_string());
 
@@ -191,10 +194,10 @@ impl IliasElement for Assignment {
 impl Assignment {
     pub fn is_active(&self) -> bool {
         self.submission_end_date
-            .map_or(true, |date| date >= Local::now())
+            .is_none_or(|date| date >= Local::now())
             && self
                 .submission_start_date
-                .map_or(true, |date| date <= Local::now())
+                .is_none_or(|date| date <= Local::now())
     }
 
     pub fn get_submission(
@@ -246,11 +249,11 @@ impl Assignment {
                         .as_str(),
                 )
             })
-            .whatever_context(format!("Did not find {:?} property", keys))?;
+            .whatever_context(format!("Did not find {keys:?} property"))?;
         property_row
             .select(info_property_value_selector)
             .next()
-            .whatever_context(format!("Did not find value for {:?} property", keys))
+            .whatever_context(format!("Did not find value for {keys:?} property"))
     }
 
     fn get_value_for_keys(info_screen: &[ElementRef], keys: &[&str]) -> Result<String, Whatever> {

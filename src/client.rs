@@ -2,12 +2,12 @@ use std::{borrow::Cow, fmt::Debug, path::Path};
 
 use log::info;
 use reqwest::{
-    multipart::{self, Form, Part},
     Client, Response, Url,
+    multipart::{self, Form, Part},
 };
 use scraper::{Html, Selector};
-use serde::{de::DeserializeOwned, Serialize};
-use snafu::{whatever, OptionExt, ResultExt, Whatever};
+use serde::{Serialize, de::DeserializeOwned};
+use snafu::{OptionExt, ResultExt, Whatever, whatever};
 use tokio::{fs::File, io::BufWriter, runtime::Runtime};
 use tokio_stream::StreamExt;
 use tokio_util::io::StreamReader;
@@ -77,23 +77,23 @@ impl IliasClient {
         if response.url().as_str().contains("error") {
             whatever!("Ilias error page");
         }
-        Ok(response
+        response
             .error_for_status()
-            .whatever_context("Response had an error status code")?)
+            .whatever_context("Response had an error status code")
     }
 
     pub fn get_text(&self, response: Response) -> Result<String, Whatever> {
-        Ok(self
+        self
             .runtime
             .block_on(response.text())
-            .whatever_context("Could not get text of response")?)
+            .whatever_context("Could not get text of response")
     }
 
     pub fn get_json<T: DeserializeOwned>(&self, response: Response) -> Result<T, Whatever> {
-        Ok(self
+        self
             .runtime
             .block_on(response.json())
-            .whatever_context("Could not get json from response")?)
+            .whatever_context("Could not get json from response")
     }
 
     pub fn is_alert_response(&self, response: Response) -> Result<bool, Whatever> {
@@ -116,9 +116,9 @@ impl IliasClient {
             .block_on(self.client.post(url).multipart(form).send())
             .whatever_context("Could not send multipart form")?;
 
-        Ok(response
+        response
             .error_for_status()
-            .whatever_context("Response had an error status code")?)
+            .whatever_context("Response had an error status code")
     }
 
     pub fn download_file(&self, querypath: &str, to: &Path) -> Result<(), Whatever> {
@@ -135,7 +135,7 @@ impl IliasClient {
                     .whatever_context("Could not get response for download url")?;
                 let body_stream = response.bytes_stream();
                 let body_stream = body_stream.map(|result| {
-                    result.map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))
+                    result.map_err(std::io::Error::other)
                 });
                 let mut body_reader = StreamReader::new(body_stream);
 
@@ -306,10 +306,10 @@ impl IliasClient {
             })
         };
 
-        Ok(self
+        self
             .runtime
             .block_on(part)
-            .whatever_context("Could not construct file part")?)
+            .whatever_context("Could not construct file part")
     }
 }
 

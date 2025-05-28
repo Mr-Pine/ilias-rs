@@ -71,10 +71,10 @@ impl GradeSubmission {
             let team_id = team_id
                 .trim()
                 .strip_prefix("(")
-                .whatever_context(format!("Unexpected team id (no prefix '(') {}", team_id))?;
+                .whatever_context(format!("Unexpected team id (no prefix '(') {team_id}"))?;
             let team_id = team_id
                 .strip_suffix(")")
-                .whatever_context(format!("Unexpected team id (no suffix ')') {}", team_id))?;
+                .whatever_context(format!("Unexpected team id (no suffix ')') {team_id}"))?;
 
             format!("Team {team_id}")
         } else if let Some(signin_name_element) = element.select(signin_name_selector).next()

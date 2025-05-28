@@ -2,14 +2,14 @@ use std::{fmt::Display, sync::OnceLock};
 
 use log::{debug, info};
 use regex::Regex;
-use reqwest::{multipart::Form, Url};
-use scraper::{element_ref::Select, selectable::Selectable, ElementRef, Selector};
+use reqwest::{Url, multipart::Form};
+use scraper::{ElementRef, Selector, element_ref::Select, selectable::Selectable};
 use serde::{Deserialize, Serialize};
-use snafu::{whatever, OptionExt, ResultExt, Whatever};
+use snafu::{OptionExt, ResultExt, Whatever, whatever};
 
 use super::{
-    client::IliasClient, file::File, local_file::NamedLocalFile, parse_date, IliasElement,
-    Querypath,
+    IliasElement, Querypath, client::IliasClient, file::File, local_file::NamedLocalFile,
+    parse_date,
 };
 
 #[derive(Clone, Debug)]
@@ -230,7 +230,9 @@ impl Folder {
                 .is_alert_response(response)
                 .whatever_context("Could not check error state of response")?
             {
-                whatever!("Upload response has an error, please check if the file was uploaded and report")
+                whatever!(
+                    "Upload response has an error, please check if the file was uploaded and report"
+                )
             }
         }
 
@@ -282,8 +284,7 @@ impl FolderElement {
             .captures(&querypath)
             .and_then(|capture| capture.name("id"))
             .whatever_context(format!(
-                "Could not get id captures from querypath {}",
-                querypath
+                "Could not get id captures from querypath {querypath}"
             ))?
             .as_str()
             .to_string();
@@ -318,13 +319,13 @@ impl FolderElement {
             .and_then(|captures| Some(captures.name("querypath")?.as_str().to_string()))?;
         let actions = ilias_client.get_querypath(&actions_querypath).ok()?;
 
-        let deletion_querypath = actions
+        
+
+        actions
             .select(element_actions_selector)
             .filter_map(|element| element.attr("href"))
             .find(|&href| href.contains("cmd=delete"))
-            .map(ToOwned::to_owned);
-
-        deletion_querypath
+            .map(ToOwned::to_owned)
     }
 
     fn extract_from_querypath(
@@ -466,7 +467,7 @@ impl FolderElement {
                     "You can not delete this element: {}",
                     self.name()
                 ))?)
-                .whatever_context(format!("Error getting delete page for {:?}", self))?;
+                .whatever_context(format!("Error getting delete page for {self:?}"))?;
 
         let confirm_button_selector = CONFIRM_BUTTON_SELECTOR.get_or_init(|| {
             Selector::parse(".il-layout-page-content>.modal form").expect("Could not parse scraper")
@@ -484,8 +485,7 @@ impl FolderElement {
         ilias_client
             .post_querypath_form(confirm_querypath, &form_data)
             .whatever_context(format!(
-                "Error while submitting delete confirmation for {:?}",
-                self
+                "Error while submitting delete confirmation for {self:?}"
             ))?;
         info!(
             "Deleted {} via deletion querypath {:?}",
