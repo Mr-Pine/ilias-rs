@@ -158,34 +158,30 @@ impl GradePage {
         ilias_client: &IliasClient,
         changed_submissions: &Vec<GradeSubmission>,
     ) -> Result<(), Whatever> {
-        let mut form_data = vec![
-            ("flt_status".to_string(), "".to_string()),
-            ("flt_subm".to_string(), "".to_string()),
-            ("flt_subm_after".to_string(), "".to_string()),
-            ("flt_subm_before".to_string(), "".to_string()),
-            ("tblfsexc_mem[]".to_string(), "login".to_string()),
-            ("tblfsexc_mem[]".to_string(), "submission".to_string()),
-            ("tblfsexc_mem[]".to_string(), "idl".to_string()),
-            ("tblfsexc_mem[]".to_string(), "mark".to_string()),
-            ("tblfshexc_mem".to_string(), "1".to_string()),
-            ("tbltplcrt".to_string(), "".to_string()),
-            ("selected_cmd".to_string(), "saveStatusSelected".to_string()),
-            (
-                "selected_cmd2".to_string(),
-                "saveStatusSelected".to_string(),
-            ),
-            ("select_cmd2".to_string(), "Ausführen".to_string()),
+        let form_data = [
+            ("flt_status", ""),
+            ("flt_subm", ""),
+            ("flt_subm_after", ""),
+            ("flt_subm_before", ""),
+            ("tblfsexc_mem[]", "login"),
+            ("tblfsexc_mem[]", "submission"),
+            ("tblfsexc_mem[]", "idl"),
+            ("tblfsexc_mem[]", "mark"),
+            ("tblfshexc_mem", "1"),
+            ("tbltplcrt", ""),
+            ("selected_cmd", "saveStatusSelected"),
+            ("selected_cmd2", "saveStatusSelected"),
+            ("select_cmd2", "Ausführen"),
         ];
+        let mut form_data = form_data.map(|(a, b)| (a.to_string(), b)).to_vec();
+
         for submission in changed_submissions {
-            form_data.push(("sel_part_ids[]".to_string(), submission.ilias_id.clone()));
-            form_data.push(("listed_part_ids[]".to_string(), submission.ilias_id.clone()));
-            form_data.push((
-                format!("status[{}]", &submission.ilias_id),
-                "notgraded".to_string(),
-            ));
+            form_data.push(("sel_part_ids[]".to_string(), &submission.ilias_id));
+            form_data.push(("listed_part_ids[]".to_string(), &submission.ilias_id));
+            form_data.push((format!("status[{}]", &submission.ilias_id), "notgraded"));
             form_data.push((
                 format!("mark[{}]", &submission.ilias_id),
-                submission.points.clone(),
+                &submission.points,
             ));
         }
         ilias_client.post_querypath_form(&self.toolbar_form_querypath, &form_data)?;
