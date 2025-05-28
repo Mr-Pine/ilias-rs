@@ -1,4 +1,4 @@
-use std::{fmt::Display, path::Path, sync::OnceLock};
+use std::{path::Path, sync::OnceLock};
 
 use base64::Engine;
 use regex::Regex;
