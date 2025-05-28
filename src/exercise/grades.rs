@@ -188,8 +188,7 @@ impl GradePage {
                 submission.points.clone(),
             ));
         }
-        let response =
-            ilias_client.post_querypath_form(&self.toolbar_form_querypath, &form_data)?;
+        ilias_client.post_querypath_form(&self.toolbar_form_querypath, &form_data)?;
         Ok(())
     }
 }
