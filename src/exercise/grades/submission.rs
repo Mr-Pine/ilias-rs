@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::{fmt::Display, sync::OnceLock};
 
 use log::debug;
 use regex::Regex;
@@ -13,16 +13,25 @@ use crate::{
 };
 
 /// A submission of a user or team for an assignment that feedback can be uploaded to.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GradeSubmission {
     pub identifier: String,
     pub file_feedback_querypath: String,
+    pub ilias_id: String,
+    pub points: String,
+}
+impl Display for GradeSubmission {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{} , ({})", self.identifier, self.ilias_id)
+    }
 }
 
 static DROPDOWN_ACTION_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static TEAM_ID_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static SIGNIN_NAME_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static NAME_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static ILIAS_ID_SELECTOR: OnceLock<Selector> = OnceLock::new();
+static POINTS_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
 static UPLOAD_FEEDBACK_FORM_SELECTOR: OnceLock<Selector> = OnceLock::new();
 static POST_UPLOAD_FEEDBACK_FORM_SELECTOR: OnceLock<Selector> = OnceLock::new();
@@ -43,6 +52,14 @@ impl GradeSubmission {
         });
         let name_selector = NAME_SELECTOR.get_or_init(|| {
             Selector::parse("td:nth-child(2).std").expect("Could not parse selector")
+        });
+        let ilias_id_selector = ILIAS_ID_SELECTOR.get_or_init(|| {
+            Selector::parse("td:nth-child(1) > input:nth-child(1)")
+                .expect("Could not parse selector")
+        });
+        let points_selector = POINTS_SELECTOR.get_or_init(|| {
+            Selector::parse("td:nth-child(7) > input:nth-child(1)")
+                .expect("Could not parse selector")
         });
 
         let identifier = if let Some(team_id_element) = element.select(team_id_selector).next() {
@@ -72,7 +89,28 @@ impl GradeSubmission {
         } else {
             whatever!("This submission style is not yet supported");
         };
-        let identifier  = identifier.replace("Ä", "Ae").replace("ä", "ae").replace("Ü","Ue").replace("ü","ue").replace("Ö","Oe").replace("ö","oe").replace("ß","ss");
+        let identifier = identifier
+            .replace("Ä", "Ae")
+            .replace("ä", "ae")
+            .replace("Ü", "Ue")
+            .replace("ü", "ue")
+            .replace("Ö", "Oe")
+            .replace("ö", "oe")
+            .replace("ß", "ss");
+
+        let ilias_id = element
+            .select(ilias_id_selector)
+            .next()
+            .expect("Could not find ilais id");
+
+        let points = element
+            .select(points_selector)
+            .next()
+            .whatever_context(format!("Did not find points for {identifier}"))?
+            .value()
+            .attr("value")
+            .whatever_context("Could not parse points for {identifier}")?
+            .to_owned();
 
         let feedback_querypath = element
             .select(dropdown_action_selector)
@@ -89,6 +127,12 @@ impl GradeSubmission {
         Ok(Some(GradeSubmission {
             identifier,
             file_feedback_querypath: feedback_querypath,
+            ilias_id: ilias_id
+                .value()
+                .attr("value")
+                .expect("Attribute value not found")
+                .to_owned(),
+            points,
         }))
     }
 

@@ -152,4 +152,39 @@ impl GradePage {
 
         Ok(())
     }
+
+    pub fn update_points(
+        &self,
+        ilias_client: &IliasClient,
+        changed_submissions: &Vec<GradeSubmission>,
+    ) -> Result<(), Whatever> {
+        let form_data = [
+            ("flt_status", ""),
+            ("flt_subm", ""),
+            ("flt_subm_after", ""),
+            ("flt_subm_before", ""),
+            ("tblfsexc_mem[]", "login"),
+            ("tblfsexc_mem[]", "submission"),
+            ("tblfsexc_mem[]", "idl"),
+            ("tblfsexc_mem[]", "mark"),
+            ("tblfshexc_mem", "1"),
+            ("tbltplcrt", ""),
+            ("selected_cmd", "saveStatusSelected"),
+            ("selected_cmd2", "saveStatusSelected"),
+            ("select_cmd2", "Ausführen"),
+        ];
+        let mut form_data = form_data.map(|(a, b)| (a.to_string(), b)).to_vec();
+
+        for submission in changed_submissions {
+            form_data.push(("sel_part_ids[]".to_string(), &submission.ilias_id));
+            form_data.push(("listed_part_ids[]".to_string(), &submission.ilias_id));
+            form_data.push((format!("status[{}]", &submission.ilias_id), "notgraded"));
+            form_data.push((
+                format!("mark[{}]", &submission.ilias_id),
+                &submission.points,
+            ));
+        }
+        ilias_client.post_querypath_form(&self.toolbar_form_querypath, &form_data)?;
+        Ok(())
+    }
 }
