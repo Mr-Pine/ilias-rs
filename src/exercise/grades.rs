@@ -188,7 +188,6 @@ impl GradePage {
                 submission.points.clone(),
             ));
         }
-        debugln!("{:?}", form_data);
         let response =
             ilias_client.post_querypath_form(&self.toolbar_form_querypath, &form_data)?;
         Ok(())
